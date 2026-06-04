@@ -257,8 +257,40 @@ module Pcrd
     method_option :"maintenance-confirmed", type: :boolean, default: false,
                   desc: "Skip interactive confirmation that the app is in maintenance mode"
     def cutover
-      require_config!
-      say "cutover: not yet implemented", :yellow
+      config = load_config!
+
+      unless options[:"maintenance-confirmed"]
+        say "\nThe application must be in maintenance mode before continuing."
+        say "Maintenance mode options:"
+        say "  pgBouncer:  PAUSE <database>"
+        say "  Kubernetes: kubectl scale --replicas=0 deployment/app"
+        say "  Rails:      enable maintenance middleware"
+        say ""
+        answer = ask("Is the application in maintenance mode? [y/N]")
+        return unless answer.strip.downcase == "y"
+      end
+
+      source_pool = Connection::Pool.new(config.source)
+      target_pool = Connection::Pool.new(config.target)
+      printer     = Output::CutoverPrinter.new
+
+      say "\nRunning cutover sequence..."
+      orchestrator = Cutover::Orchestrator.new(
+        source_pool: source_pool,
+        target_pool: target_pool,
+        config:      config
+      )
+
+      result = orchestrator.run(on_progress: ->(msg) { say "  #{msg}" })
+
+      printer.print(result)
+
+      source_pool.close
+      target_pool.close
+
+      exit(result.passed ? 0 : 1)
+    rescue Connection::Error => e
+      raise Thor::Error, "Connection failed: #{e.message}"
     end
 
     desc "verify", "Compare row counts and spot-check rows across clusters"
@@ -273,8 +305,14 @@ module Pcrd
     method_option :"post-cutover", type: :boolean, default: false,
                   desc: "Post-cutover mode: compare against the now-live target cluster"
     def verify
-      require_config!
-      say "verify: not yet implemented", :yellow
+      config  = load_config!
+      result  = Commands::Verify.new(config, options).run
+      Output::CutoverPrinter.new.print_verify(result)
+      exit(result.passed ? 0 : 1)
+    rescue Connection::Error => e
+      raise Thor::Error, "Connection failed: #{e.message}"
+    rescue RuntimeError => e
+      raise Thor::Error, "ERROR: #{e.message}"
     end
 
     desc "demo SUBCOMMAND", "Set up and seed a demo database for testing and demonstration"
