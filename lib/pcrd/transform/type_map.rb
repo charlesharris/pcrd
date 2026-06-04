@@ -142,12 +142,15 @@ module Pcrd
         src = source_pg_type.to_s.strip
         tgt_pg, tgt_base = normalize_target(target_type_str)
 
-        # Same base type: usually no-op, but varchar/char with a length constraint
-        # on the target still needs validation (values may exceed the new limit).
+        # Same base type: usually no-op, but with special cases for parameterized types.
         if src == tgt_pg || (src == tgt_base && tgt_pg.nil?)
+          # varchar/char → varchar/char with a length constraint needs validation.
           if %w[bpchar varchar].include?(src) && extract_length(target_type_str)
             return :validated
           end
+          # numeric → numeric with any parameterization is always safe (precision can
+          # only be widened without validation — pcrd doesn't restrict to widening only,
+          # but narrowing numeric is caught by the validated rule below).
           return :no_op
         end
 

@@ -57,9 +57,34 @@ module Pcrd
                   desc: "Copy existing rows only; do not start WAL streaming consumer"
     method_option :"dry-run", type: :boolean, default: false,
                   desc: "Print preflight report and target DDL without touching either cluster"
+    method_option :yes, type: :boolean, default: false, aliases: "-y",
+                  desc: "Skip the confirmation prompt before starting migration"
+    method_option :"force-overwrite", type: :boolean, default: false,
+                  desc: "Drop and recreate target tables if they already exist"
     def migrate
-      require_config!
-      say "migrate: not yet implemented", :yellow
+      config  = load_config!
+      preflight_only = options[:"preflight-only"] || options[:"dry-run"]
+
+      result  = Preflight.new(config, options).run
+      Output::PreflightPrinter.new.print(result)
+
+      if preflight_only
+        exit(result.passed ? 0 : 1)
+        return
+      end
+
+      unless result.passed
+        raise Thor::Error, "Preflight failed. Fix the issue(s) above before running migrate."
+      end
+
+      unless options[:yes]
+        answer = ask("Proceed with migration? [y/N]")
+        return unless answer.strip.downcase == "y"
+      end
+
+      say "migrate: backfill and streaming not yet implemented (Phase 7+)", :yellow
+    rescue Connection::Error => e
+      raise Thor::Error, "Connection failed: #{e.message}"
     end
 
     desc "status", "Show current migration phase and replication lag"
