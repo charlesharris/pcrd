@@ -1,5 +1,7 @@
 # pcrd — PostgreSQL Column Rewrite Daemon
 
+![Captain Picard happy dance](https://media.tenor.com/05Jm-dslzLgAAAAM/happy-dance-star-trek.gif)
+
 **Pronounced "Picard."** Zero-downtime cross-cluster PostgreSQL migrations using logical replication.
 
 pcrd migrates large tables to a new PostgreSQL cluster with column type changes, renames, additions, drops, and column reordering — without locking your source database for more than a few seconds at cutover.
@@ -267,6 +269,13 @@ Run `pcrd migrate --preflight-only` to see the full safety report and generated 
 
 ## CLI Reference
 
+### `pcrd --version`
+
+```bash
+pcrd --version    # or: pcrd -v
+# → pcrd 0.1.0
+```
+
 ### `pcrd analyze`
 
 Analyze column padding for source tables. Read-only.
@@ -315,6 +324,13 @@ pcrd migrate [--config FILE] [--preflight-only] [--backfill-only] [--dry-run]
 - `--resume` — resume an interrupted migration from the last checkpoint
 - `--yes` — skip the confirmation prompt
 - `--force-overwrite` — drop and recreate target tables if they already exist
+
+**Ctrl-C / SIGINT:** pcrd finishes the current batch or WAL event, writes the checkpoint, and exits cleanly with a `--resume` command to copy. Nothing is lost.
+
+```
+Migration interrupted. Resume with:
+  pcrd migrate --config migration.yml --resume
+```
 
 **Preflight checks performed:**
 1. Source and target connectivity
@@ -460,6 +476,17 @@ max_wal_senders      = <current + number of concurrent pcrd migrations>
 
 ---
 
+## Example Project
+
+`examples/listings_migration/` contains a complete end-to-end demo:
+- **Docker Compose** environment: source cluster, target cluster, Rails API app
+- **Annotated `migration.yml`** showing all supported change types
+- **Operator runbook** walking through every step from setup to cleanup
+
+See [`examples/listings_migration/runbook.md`](examples/listings_migration/runbook.md).
+
+---
+
 ## Development
 
 ```bash
@@ -556,12 +583,12 @@ Every migrated table must have a primary key or unique not-null index. This is a
 | Apply engine | ✅ | Upsert/update/delete on target |
 | `pcrd migrate` (full) | ✅ | Backfill + streaming + lag meter |
 | `pcrd demo setup/seed` | ✅ | Demo database with realistic schema |
-| `pcrd cutover` | 🔜 | Phase 10 |
-| `pcrd verify` | 🔜 | Phase 10 |
-| `pcrd status` | 🔜 | Phase 11 |
-| `pcrd cleanup` | 🔜 | Phase 11 |
-| Docker Compose example | 🔜 | Phase 12 |
-| Full polish + README | 🔜 | Phase 13 |
+| `pcrd cutover` | ✅ | Sequence advancement, drain, verify |
+| `pcrd verify` | ✅ | Row counts + spot-check |
+| `pcrd status` | ✅ | Live lag meter from checkpoint |
+| `pcrd cleanup` | ✅ | Drop slot/pub/checkpoint |
+| Docker Compose example | ✅ | Rails app + runbook |
+| Full polish + README | ✅ | |
 
 ---
 

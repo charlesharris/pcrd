@@ -6,12 +6,19 @@ require "pastel"
 module Pcrd
   class CLI < Thor
     PASTEL = Pastel.new
+
     def self.exit_on_failure?
       true
     end
 
     class_option :config, type: :string, aliases: "-c",
                           desc: "Path to migration YAML config (required for all commands)"
+
+    map %w[--version -v] => :version
+    desc "--version, -v", "Show pcrd version"
+    def version
+      say "pcrd #{Pcrd::VERSION}"
+    end
 
     desc "analyze", "Analyze column padding for source tables"
     long_desc <<~DESC
@@ -64,10 +71,19 @@ module Pcrd
     method_option :"force-overwrite", type: :boolean, default: false,
                   desc: "Drop and recreate target tables if they already exist"
     def migrate
-      config  = load_config!
+      config         = load_config!
       preflight_only = options[:"preflight-only"] || options[:"dry-run"]
 
-      result  = Preflight.new(config, options).run
+      unless preflight_only
+        raise Thor::Error,
+              "ERROR: migrate requires a 'target' section in your config.\n\n" \
+              "Use --preflight-only to validate without a target connection." if config.target.nil?
+
+        raise Thor::Error,
+              "ERROR: migrate requires a 'migrate' section in your config." if config.migrate.nil?
+      end
+
+      result = Preflight.new(config, options).run
       Output::PreflightPrinter.new.print(result)
 
       if preflight_only
@@ -195,6 +211,10 @@ module Pcrd
       lag_check_interval = 2
       last_lag_check     = 0
 
+      # Re-register SIGINT for the streaming phase so Ctrl-C breaks the loop cleanly.
+      trap("INT")  { stop_requested = true; say "\n\nStopping after current event..." }
+      trap("TERM") { stop_requested = true }
+
       loop do
         break if stop_requested
 
@@ -222,14 +242,19 @@ module Pcrd
       end
 
       say ""
-      consumer.stop
-      checkpoint.close
-      source_pool.close
-      target_pool.close
+      if stop_requested
+        say "Migration interrupted. Resume with:", :yellow
+        say "  pcrd migrate --config #{options[:config] || Config::DEFAULT_CONFIG_FILE} --resume", :yellow
+      end
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
     rescue RuntimeError => e
       raise Thor::Error, "ERROR: #{e.message}"
+    ensure
+      consumer&.stop rescue nil
+      checkpoint&.close rescue nil
+      source_pool&.close rescue nil
+      target_pool&.close rescue nil
     end
 
     desc "status", "Show current migration phase and replication lag"
