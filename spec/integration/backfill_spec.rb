@@ -7,8 +7,7 @@ require_relative "../support/pg_helpers"
 RSpec.describe "Backfill::Engine (integration)", :integration do
   include PgHelpers
 
-  # Same table name on both clusters — pcrd is a cross-cluster tool.
-  SOURCE_DDL = <<~SQL.freeze
+  BACKFILL_SOURCE_DDL = <<~SQL.freeze
     CREATE TABLE pcrd_backfill_test (
       id        integer NOT NULL,
       label     text,
@@ -17,7 +16,7 @@ RSpec.describe "Backfill::Engine (integration)", :integration do
     )
   SQL
 
-  TARGET_DDL = <<~SQL.freeze
+  BACKFILL_TARGET_DDL = <<~SQL.freeze
     CREATE TABLE pcrd_backfill_test (
       id        bigint  NOT NULL,
       label     text,
@@ -70,14 +69,14 @@ RSpec.describe "Backfill::Engine (integration)", :integration do
 
   def target_with_table
     target_pool.exec_sql("DROP TABLE IF EXISTS pcrd_backfill_test CASCADE")
-    target_pool.exec_sql(TARGET_DDL)
+    target_pool.exec_sql(BACKFILL_TARGET_DDL)
     yield
   ensure
     target_pool.exec_sql("DROP TABLE IF EXISTS pcrd_backfill_test CASCADE")
   end
 
   around do |example|
-    with_table(source_pool, SOURCE_DDL, table_name: "pcrd_backfill_test") do
+    with_table(source_pool, BACKFILL_SOURCE_DDL, table_name: "pcrd_backfill_test") do
       target_with_table { example.run }
     end
     checkpoint.close

@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 require "thor"
+require "pastel"
 
 module Pcrd
   class CLI < Thor
+    PASTEL = Pastel.new
     def self.exit_on_failure?
       true
     end
@@ -85,46 +87,142 @@ module Pcrd
       source_pool = Connection::Pool.new(config.source)
       target_pool = Connection::Pool.new(config.target)
       checkpoint  = Checkpoint::Store.new(config.migrate.checkpoint_db)
+      setup       = Schema::Setup.new(source_pool: source_pool, target_pool: target_pool, config: config)
 
-      # Create target tables (skip if resuming and they already exist)
-      unless options[:resume]
+      # ── Setup (skipped on --resume) ────────────────────────────────────
+      if options[:resume]
+        start_lsn = checkpoint.backfill_start_lsn || "0/0"
+        say "\nResuming migration from LSN #{start_lsn}..."
+      else
+        unless options[:"backfill-only"]
+          say "\nCreating publication and replication slot..."
+          start_lsn = setup.create_publication_and_slot(
+            pub_name:  config.migrate.publication,
+            slot_name: config.migrate.replication_slot
+          )
+          checkpoint.set_backfill_start_lsn(start_lsn)
+          say "  Slot created at LSN #{start_lsn}.", :green
+        else
+          start_lsn = "0/0"
+        end
+
         say "\nCreating target tables..."
-        setup = Schema::Setup.new(source_pool: source_pool, target_pool: target_pool, config: config)
         setup.create_target_tables(force_overwrite: options[:"force-overwrite"])
         say "  Target tables created.", :green
       end
 
-      say "\nStarting backfill..."
-      engine = Backfill::Engine.new(
+      # ── WAL consumer thread (streaming mode only) ──────────────────────
+      consumer = nil
+      unless options[:"backfill-only"]
+        repl_conn = Connection::Replication.new(config.source)
+        parser    = Replication::Pgoutput::Parser.new
+        consumer  = Replication::Consumer.new(
+          repl_conn:  repl_conn,
+          parser:     parser,
+          slot_name:  config.migrate.replication_slot,
+          pub_name:   config.migrate.publication,
+          start_lsn:  start_lsn
+        )
+        say "\nStarting WAL consumer..."
+        consumer.start
+        say "  Streaming from #{start_lsn}.", :green
+      end
+
+      # ── Backfill ───────────────────────────────────────────────────────
+      backfill_engine = Backfill::Engine.new(
         source_pool: source_pool,
         target_pool: target_pool,
         config:      config,
         checkpoint:  checkpoint
       )
 
-      trap("INT")  { engine.stop!; say "\nStopping after current batch..." }
-      trap("TERM") { engine.stop! }
+      stop_requested = false
+      trap("INT")  { stop_requested = true; backfill_engine.stop!; say "\nStopping..." }
+      trap("TERM") { stop_requested = true; backfill_engine.stop! }
 
-      results = engine.run(on_batch: method(:print_batch_progress))
+      say "\nStarting backfill..."
+      bf_results = backfill_engine.run(on_batch: method(:print_batch_progress))
+      say ""
+
+      bf_results.each do |r|
+        status = r.stopped_early ? " (interrupted)" : ""
+        say "  #{r.table_name}: #{format_count(r.rows_copied)} rows in #{r.batch_count} batches#{status}", :green
+      end
+
+      if bf_results.any?(&:stopped_early) || stop_requested
+        consumer&.stop
+        checkpoint.close
+        source_pool.close
+        target_pool.close
+        say "\nInterrupted. Resume with --resume.", :yellow
+        return
+      end
+
+      say "\nBackfill complete.", :green
+
+      if options[:"backfill-only"]
+        consumer&.stop
+        checkpoint.close
+        source_pool.close
+        target_pool.close
+        say "Run `pcrd verify` to check row counts, then `pcrd cutover` when ready."
+        return
+      end
+
+      # ── Apply engine: drain buffered events + keep streaming ───────────
+      say "Entering streaming mode. Press Ctrl-C to stop.\n"
+
+      source_schema = bf_results.each_with_object({}) do |r, h|
+        reader = Schema::Reader.new(source_pool)
+        h[r.table_name] = {
+          columns:    reader.read(r.table_name),
+          pk_columns: reader.primary_key_columns(r.table_name)
+        }
+      end
+
+      apply_engine = Apply::Engine.new(
+        target_pool:   target_pool,
+        config:        config,
+        parser:        parser,
+        source_schema: source_schema
+      )
+
+      lag_monitor = Monitor::Lag.new(
+        source_pool: source_pool,
+        slot_name:   config.migrate.replication_slot
+      )
+
+      lag_check_interval = 2
+      last_lag_check     = 0
+
+      loop do
+        break if stop_requested
+
+        # Drain one transaction from queue (non-blocking)
+        txn = consumer.queue.pop(true)
+        apply_engine.apply(txn)
+        consumer.advance_lsn(txn.commit_lsn)
+        checkpoint.set_lsn(txn.commit_lsn)
+
+      rescue ThreadError
+        # Queue is empty — check lag and sleep briefly
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if now - last_lag_check >= lag_check_interval
+          lag = lag_monitor.lag_bytes
+          threshold = config.migrate.lag_threshold_bytes
+          if lag && lag <= threshold
+            $stdout.print "\r  Lag: #{lag_monitor.summary}  #{PASTEL.green("✓ Ready for cutover")}   "
+          else
+            $stdout.print "\r  Lag: #{lag_monitor.summary}   "
+          end
+          $stdout.flush
+          last_lag_check = now
+        end
+        sleep 0.1
+      end
 
       say ""
-      results.each do |r|
-        status = r.stopped_early ? " (interrupted)" : ""
-        say "  #{r.table_name}: #{format_count(r.rows_copied)} rows in " \
-            "#{r.batch_count} batches#{status}", :green
-      end
-
-      if results.any?(&:stopped_early)
-        say "\nBackfill interrupted. Resume with --resume.", :yellow
-      else
-        say "\nBackfill complete.", :green
-        if options[:"backfill-only"]
-          say "Run `pcrd verify` to check row counts, then `pcrd cutover` when ready."
-        else
-          say "Streaming not yet implemented — coming in a future phase.", :yellow
-        end
-      end
-
+      consumer.stop
       checkpoint.close
       source_pool.close
       target_pool.close

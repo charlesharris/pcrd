@@ -14,6 +14,37 @@ module Pcrd
         @config      = config
       end
 
+      # Creates the publication and replication slot on the source.
+      # Returns the slot's starting LSN as a "X/Y" string — pass this to the
+      # consumer so streaming begins from a point that covers all of backfill.
+      def create_publication_and_slot(pub_name:, slot_name:)
+        table_list = @config.migrate.tables.map { |t|
+          "#{@source_pool.quote_ident("public")}.#{@source_pool.quote_ident(t.name)}"
+        }.join(", ")
+
+        @source_pool.exec_sql(
+          "CREATE PUBLICATION #{@source_pool.quote_ident(pub_name)} FOR TABLE #{table_list}"
+        )
+
+        result = @source_pool.exec(
+          "SELECT lsn FROM pg_create_logical_replication_slot($1, 'pgoutput')",
+          [slot_name]
+        )
+        result[0]["lsn"]
+      end
+
+      # Drops the publication and replication slot (cleanup phase).
+      def drop_publication_and_slot(pub_name:, slot_name:)
+        @source_pool.exec_sql(
+          "DROP PUBLICATION IF EXISTS #{@source_pool.quote_ident(pub_name)}"
+        )
+        @source_pool.exec(
+          "SELECT pg_drop_replication_slot($1) WHERE EXISTS (" \
+          "  SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)",
+          [slot_name]
+        )
+      end
+
       # Creates all target tables and returns a Hash<table_name, ddl_string>.
       # Raises if a target table already exists (use --force-overwrite to drop first).
       def create_target_tables(force_overwrite: false)

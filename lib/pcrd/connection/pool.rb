@@ -14,6 +14,7 @@ module Pcrd
       def exec(sql, params = [])
         connection.exec_params(sql, params)
       rescue PG::Error => e
+        reset_connection!
         raise Error, e.message
       end
 
@@ -21,6 +22,7 @@ module Pcrd
       def exec_sql(sql)
         connection.exec(sql)
       rescue PG::Error => e
+        reset_connection!
         raise Error, e.message
       end
 
@@ -76,6 +78,12 @@ module Pcrd
         )
       rescue PG::ConnectionBad => e
         raise Error, "Cannot connect to #{@config.host}:#{@config.port}/#{@config.database}: #{e.message}"
+      end
+
+      def reset_connection!
+        # If the connection is in an aborted transaction, attempt a rollback
+        # so subsequent commands on the same connection can proceed.
+        @conn&.exec("ROLLBACK") rescue nil
       end
     end
   end
