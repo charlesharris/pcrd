@@ -1,0 +1,5 @@
+*.sqlite3
+rails_app/tmp/
+rails_app/log/
+rails_app/.bundle/
+rails_app/vendor/bundle/

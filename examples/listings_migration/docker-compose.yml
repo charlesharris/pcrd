@@ -1,0 +1,76 @@
+version: "3.9"
+
+# Full example environment for the pcrd listings migration demo.
+#
+# Services:
+#   source_db  — the live production cluster (old schema, int IDs)
+#   target_db  — the new cluster (pcrd writes the new schema here)
+#   rails_app  — example Rails API app, connecting to source_db
+#
+# Ports exposed to host (for running pcrd from the command line):
+#   source_db  → localhost:5433
+#   target_db  → localhost:5434
+#   rails_app  → localhost:3000
+#
+# Usage: see runbook.md
+
+services:
+  source_db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB:       myapp_production
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    command: >
+      postgres
+        -c wal_level=logical
+        -c max_replication_slots=10
+        -c max_wal_senders=10
+    volumes:
+      - source_data:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout:  5s
+      retries:  5
+
+  target_db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB:       myapp_production
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - target_data:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout:  5s
+      retries:  5
+
+  rails_app:
+    build:
+      context: ./rails_app
+    environment:
+      DATABASE_URL:        postgres://postgres:postgres@source_db/myapp_production
+      RAILS_ENV:           development
+      RAILS_LOG_TO_STDOUT: "true"
+      # Set MAINTENANCE_MODE=true to put the app in maintenance mode during cutover.
+      # docker compose exec rails_app env MAINTENANCE_MODE=true ... or restart with it set.
+      MAINTENANCE_MODE: "false"
+    ports:
+      - "3000:3000"
+    depends_on:
+      source_db:
+        condition: service_healthy
+    # The app starts before the schema exists. It will return 503 until
+    # `pcrd demo setup` creates the tables. This is intentional — the app
+    # starts immediately; schema setup is an explicit operator step.
+
+volumes:
+  source_data:
+  target_data:

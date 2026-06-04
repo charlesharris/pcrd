@@ -1,0 +1,98 @@
+# migration.yml — pcrd configuration for the listings migration example.
+#
+# Source: the live cluster (old schema, integer IDs)
+# Target: the new cluster (bigint IDs, improved types, optimized column order)
+#
+# Run from the examples/listings_migration/ directory:
+#   pcrd analyze   --config migration.yml
+#   pcrd migrate   --config migration.yml --preflight-only
+#   pcrd migrate   --config migration.yml --yes
+#   pcrd status    --config migration.yml
+#   pcrd cutover   --config migration.yml --maintenance-confirmed
+#   pcrd verify    --config migration.yml
+#   pcrd cleanup   --config migration.yml
+
+source:
+  host:     localhost
+  port:     5433
+  database: myapp_production
+  user:     postgres
+  # password: via PCRD_SOURCE_PASSWORD env var or ~/.pgpass
+  # For this demo: export PCRD_SOURCE_PASSWORD=postgres
+
+target:
+  host:     localhost
+  port:     5434
+  database: myapp_production
+  user:     postgres
+  # password: via PCRD_TARGET_PASSWORD env var or ~/.pgpass
+
+migrate:
+  replication_slot: pcrd_listings_demo
+  publication:      pcrd_pub_listings_demo
+  checkpoint_db:    ./pcrd_checkpoint.sqlite3
+  batch_size:       10_000
+  lag_threshold_bytes: 1_048_576   # 1 MB
+
+  tables:
+    # ── users ──────────────────────────────────────────────────────────────
+    - name: users
+      columns:
+        id:
+          type: bigint    # integer → bigint  (always safe, no validation needed)
+        # All other columns (is_admin, email, first_name, last_name, created_at)
+        # are copied as-is — no entry needed.
+
+    # ── agents ─────────────────────────────────────────────────────────────
+    - name: agents
+      columns:
+        id:
+          type: bigint
+        user_id:
+          type: bigint    # FK column must match the referenced PK type
+        commission_rate:
+          type: numeric(7,4)    # was numeric(5,4) — widen precision (always safe)
+        # license_number, active, hired_at, created_at: copied as-is
+
+    # ── listings ───────────────────────────────────────────────────────────
+    - name: listings
+      # Reorder columns for minimal alignment padding — free since pcrd
+      # rewrites the table anyway. Run `pcrd analyze` to see the savings.
+      optimize_column_order: true
+
+      columns:
+        id:
+          type: bigint
+        agent_id:
+          type: bigint    # FK column matches agents.id
+        list_price:
+          type:   numeric(18,4)       # numeric(10,2) → numeric(18,4): more precision
+          rename: list_price_precise  # rename in the same step
+        listed_at:
+          type: timestamptz   # timestamp → timestamptz: adds timezone awareness
+        created_at:
+          type: timestamptz
+
+        # Columns with NO entry are copied exactly as-is:
+        #   active, bedrooms, has_garage, square_feet, is_featured,
+        #   price_per_sqft, longitude, year_built, bathrooms,
+        #   is_new_construction, latitude, description,
+        #   address_line1, city, state_code, zip_code
+
+      add_columns:
+        - name:    updated_at
+          type:    timestamptz
+          default: "now()"    # populated by PostgreSQL DEFAULT expression
+
+analyze:
+  tables:
+    - listings
+    - users
+    - agents
+
+verify:
+  sample_size: 1_000
+
+cutover:
+  sequence_buffer:    1_000   # setval(seq, max_id + 1000)
+  lag_drain_timeout:  300     # seconds
