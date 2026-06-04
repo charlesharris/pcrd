@@ -239,8 +239,10 @@ module Pcrd
       seconds, and whether the migration is ready for cutover.
     DESC
     def status
-      require_config!
-      say "status: not yet implemented", :yellow
+      config = load_config!
+      Commands::Status.new(config, options).run
+    rescue Config::LoadError => e
+      raise Thor::Error, "ERROR: #{e.message}"
     end
 
     desc "cutover", "Trigger the cutover sequence"
@@ -330,8 +332,12 @@ module Pcrd
     method_option :"drop-source", type: :boolean, default: false,
                   desc: "Also drop source tables after cleanup (irreversible; requires confirmation)"
     def cleanup
-      require_config!
-      say "cleanup: not yet implemented", :yellow
+      config = load_config!
+      Commands::Cleanup.new(config, options).run
+    rescue Connection::Error => e
+      raise Thor::Error, "Connection failed: #{e.message}"
+    rescue RuntimeError => e
+      raise Thor::Error, "ERROR: #{e.message}"
     end
 
     private
