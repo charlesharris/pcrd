@@ -1,0 +1,53 @@
+source:
+  host: source.db.example.com
+  port: 5432
+  database: myapp_production
+  user: pcrd_replication
+
+target:
+  host: target.db.example.com
+  port: 5432
+  database: myapp_production
+  user: pcrd_writer
+
+migrate:
+  replication_slot: pcrd_listings
+  publication: pcrd_pub_listings
+  checkpoint_db: ./pcrd_checkpoint.sqlite3
+  batch_size: 5000
+  lag_threshold_bytes: 524288
+
+  tables:
+    - name: listings
+      optimize_column_order: true
+      columns:
+        id:
+          type: bigint
+        list_price:
+          type: numeric(18,4)
+          rename: list_price_precise
+        status_code:
+          rename: listing_status
+        legacy_notes:
+          drop: true
+      add_columns:
+        - name: updated_at
+          type: timestamptz
+          default: "now()"
+
+    - name: users
+      columns:
+        id:
+          type: bigint
+
+analyze:
+  tables:
+    - listings
+    - users
+
+verify:
+  sample_size: 500
+
+cutover:
+  sequence_buffer: 2000
+  lag_drain_timeout: 600

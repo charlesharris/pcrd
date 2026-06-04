@@ -1,0 +1,6 @@
+# Minimal valid config: only source is required.
+# All other sections and all options within them are optional.
+source:
+  host: localhost
+  database: myapp
+  user: postgres
