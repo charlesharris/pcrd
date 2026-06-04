@@ -121,21 +121,42 @@ pcrd migrate --backfill-only --yes
 
 ```bash
 # Once lag is near zero, put the app in maintenance mode, then:
-pcrd cutover --maintenance-confirmed   # (coming in Phase 10)
+pcrd cutover --maintenance-confirmed
 ```
 
 ---
 
 ## Configuration
 
-pcrd looks for `pcrd.config.yml` in the current directory by default. Pass `--config path/to/file.yml` to override.
+pcrd looks for `pcrd.config.yml` in the current directory by default. Pass `--config path/to/file.yml` to override. Run `pcrd demo setup` to generate a sample file automatically.
+
+**Full reference:** [docs/config_reference.md](docs/config_reference.md)
+
+### The most important rule: only specify what changes
+
+The `columns:` map under each table only needs entries for columns you want to **modify**. Any column not listed is migrated automatically — same name, same type, same `NOT NULL`, same `DEFAULT`. You only need a column entry if you want to change its type, rename it, or drop it.
+
+For a 20-column table where only `id` needs widening:
+
+```yaml
+migrate:
+  tables:
+    - name: orders
+      columns:
+        id:
+          type: bigint    # only this one column needs to be listed
+```
+
+The other 19 columns require no configuration.
+
+### Annotated config example
 
 ```yaml
 # pcrd.config.yml
 
 source:
   host: db-primary.old.example.com
-  port: 5432
+  port: 5432                           # default: 5432
   database: myapp_production
   user: pcrd_replication
   # password: via PCRD_SOURCE_PASSWORD env var or ~/.pgpass
@@ -143,56 +164,104 @@ source:
 target:
   host: db-primary.new.example.com
   port: 5432
-  database: myapp_production
+  database: myapp_production           # same database name on both clusters
   user: pcrd_writer
   # password: via PCRD_TARGET_PASSWORD env var or ~/.pgpass
 
 migrate:
-  # replication_slot and publication default to pcrd_<first_table> if omitted
-  batch_size: 10_000
-  lag_threshold_bytes: 1_048_576   # 1 MB — gate for cutover readiness
-  checkpoint_db: ./pcrd_checkpoint.sqlite3
+  # replication_slot and publication are auto-derived from the first table
+  # name if not set. Set explicitly when running multiple migrations.
+  replication_slot: pcrd_listings_v2   # optional
+  publication:      pcrd_pub_v2        # optional
+
+  batch_size: 10_000                   # rows per backfill batch; default 10,000
+  lag_threshold_bytes: 1_048_576       # 1 MB — "ready for cutover" threshold
+  checkpoint_db: ./pcrd_checkpoint.sqlite3  # per-batch progress; enables --resume
 
   tables:
     - name: listings
-      optimize_column_order: true   # reorder columns for padding efficiency
+
+      # Reorder columns for minimal alignment padding (free — pcrd rewrites
+      # the table anyway). Run `pcrd analyze` first to see the savings.
+      optimize_column_order: true
+
+      # Only specify columns you want to change.
+      # Every other column is copied as-is (same name, type, constraints).
       columns:
         id:
-          type: bigint              # integer → bigint (always safe)
+          type: bigint              # widen integer → bigint (always safe, no validation)
+
         list_price:
-          type: numeric(18,4)
-          rename: list_price_precise
+          type: numeric(18,4)       # widen numeric precision (always safe)
+          rename: list_price_precise  # rename in the same step
+
         status_code:
-          rename: listing_status
+          rename: listing_status    # rename only, keep the same type
+
         legacy_notes:
-          drop: true
+          drop: true                # exclude this column from the target entirely
+
+        # Not listed = copied as-is:
+        #   active, bedrooms, bathrooms, created_at, latitude, longitude, ...
+
+      # New columns to add (not present on source).
+      # Backfilled rows get the DEFAULT value; NULL if no default specified.
       add_columns:
         - name: updated_at
           type: timestamptz
-          default: "now()"
+          default: "now()"          # SQL expression evaluated by PostgreSQL
 
     - name: users
       columns:
         id:
-          type: bigint
+          type: bigint              # all other user columns copied unchanged
 
+# Tables to include in `pcrd analyze` output.
+# If omitted, analyzes all tables listed in migrate.tables.
 analyze:
   tables:
     - listings
     - users
 
+# Spot-check settings for `pcrd verify`.
 verify:
-  sample_size: 1_000
+  sample_size: 1_000               # random rows to compare field-by-field
 
+# Cutover behavior.
 cutover:
-  sequence_buffer: 1_000      # added to max(id) when advancing target sequences
-  lag_drain_timeout: 300      # seconds to wait for lag to reach zero
+  sequence_buffer: 1_000           # added to max(id) when setting target sequences
+  lag_drain_timeout: 300           # seconds to wait for lag → zero during cutover
 ```
 
-**Password handling:** Never put passwords in the YAML file. Use:
+**Passwords** — never put passwords in the config file. Use:
 - `PCRD_SOURCE_PASSWORD` environment variable
 - `PCRD_TARGET_PASSWORD` environment variable
-- `~/.pgpass` file (standard PostgreSQL password file)
+- `~/.pgpass` (standard PostgreSQL password file)
+
+### Quick reference: column change options
+
+| In `columns:` | Effect |
+|---|---|
+| `type: bigint` | Change type; keep name |
+| `rename: new_name` | Rename; keep type |
+| `type: bigint, rename: new_name` | Change type AND rename |
+| `drop: true` | Exclude from target entirely |
+| *(no entry)* | Copy exactly as-is |
+
+### Supported type changes
+
+| Cast | Safety |
+|---|---|
+| `smallint/integer → bigint` | Always safe |
+| `varchar(n) → text` | Always safe |
+| `timestamp → timestamptz` | Always safe |
+| `integer/bigint → numeric` | Always safe |
+| `bigint → integer` | Validated (range check) |
+| `text/varchar → varchar(n)` | Validated (length check) |
+| `float8 → float4` | Validated (warn only) |
+| `timestamptz → timestamp` | Validated (warn only — timezone lost) |
+
+Run `pcrd migrate --preflight-only` to see the full safety report and generated DDL before committing.
 
 ---
 
