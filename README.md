@@ -2,7 +2,7 @@
 
 ![Captain Picard happy dance](https://media.tenor.com/05Jm-dslzLgAAAAM/happy-dance-star-trek.gif)
 
-**Pronounced "Picard."** Zero-downtime cross-cluster PostgreSQL migrations using logical replication.
+Zero-downtime cross-cluster PostgreSQL migrations using logical replication.
 
 pcrd migrates large tables to a new PostgreSQL cluster with column type changes, renames, additions, drops, and column reordering — without locking your source database for more than a few seconds at cutover.
 
