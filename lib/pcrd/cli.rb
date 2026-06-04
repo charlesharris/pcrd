@@ -82,9 +82,56 @@ module Pcrd
         return unless answer.strip.downcase == "y"
       end
 
-      say "migrate: backfill and streaming not yet implemented (Phase 7+)", :yellow
+      source_pool = Connection::Pool.new(config.source)
+      target_pool = Connection::Pool.new(config.target)
+      checkpoint  = Checkpoint::Store.new(config.migrate.checkpoint_db)
+
+      # Create target tables (skip if resuming and they already exist)
+      unless options[:resume]
+        say "\nCreating target tables..."
+        setup = Schema::Setup.new(source_pool: source_pool, target_pool: target_pool, config: config)
+        setup.create_target_tables(force_overwrite: options[:"force-overwrite"])
+        say "  Target tables created.", :green
+      end
+
+      say "\nStarting backfill..."
+      engine = Backfill::Engine.new(
+        source_pool: source_pool,
+        target_pool: target_pool,
+        config:      config,
+        checkpoint:  checkpoint
+      )
+
+      trap("INT")  { engine.stop!; say "\nStopping after current batch..." }
+      trap("TERM") { engine.stop! }
+
+      results = engine.run(on_batch: method(:print_batch_progress))
+
+      say ""
+      results.each do |r|
+        status = r.stopped_early ? " (interrupted)" : ""
+        say "  #{r.table_name}: #{format_count(r.rows_copied)} rows in " \
+            "#{r.batch_count} batches#{status}", :green
+      end
+
+      if results.any?(&:stopped_early)
+        say "\nBackfill interrupted. Resume with --resume.", :yellow
+      else
+        say "\nBackfill complete.", :green
+        if options[:"backfill-only"]
+          say "Run `pcrd verify` to check row counts, then `pcrd cutover` when ready."
+        else
+          say "Streaming not yet implemented — coming in a future phase.", :yellow
+        end
+      end
+
+      checkpoint.close
+      source_pool.close
+      target_pool.close
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
+    rescue RuntimeError => e
+      raise Thor::Error, "ERROR: #{e.message}"
     end
 
     desc "status", "Show current migration phase and replication lag"
@@ -175,6 +222,17 @@ module Pcrd
 
     def require_config!
       load_config!
+    end
+
+    def print_batch_progress(stats)
+      rps = stats[:duration_ms] > 0 ? (stats[:row_count] * 1000.0 / stats[:duration_ms]).round : 0
+      $stdout.print "\r  #{stats[:table]}  batch #{stats[:batch_num]}  " \
+                    "#{format_count(stats[:rows_so_far])} rows  #{format_count(rps)} rows/s    "
+      $stdout.flush
+    end
+
+    def format_count(n)
+      n.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
     end
   end
 end

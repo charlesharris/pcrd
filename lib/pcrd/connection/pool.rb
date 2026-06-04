@@ -24,8 +24,10 @@ module Pcrd
         raise Error, e.message
       end
 
-      def copy_data(sql, &block)
-        connection.copy_data(sql, &block)
+      # For COPY ... FROM STDIN. Yields the raw PG::Connection so the caller
+      # can call conn.put_copy_data(line) inside the block.
+      def copy_data(sql)
+        connection.copy_data(sql) { yield connection }
       rescue PG::Error => e
         raise Error, e.message
       end
