@@ -26,7 +26,7 @@ module Pcrd
                       @config.verify&.sample_size || 1_000
 
         table_results = (@config.migrate&.tables || []).map do |table_config|
-          verify_table(source_pool, target_pool, table_config.name, sample_size)
+          verify_table(source_pool, target_pool, table_config, sample_size)
         end
 
         source_pool.close
@@ -40,15 +40,15 @@ module Pcrd
 
       private
 
-      def verify_table(source_pool, target_pool, table_name, sample_size)
+      def verify_table(source_pool, target_pool, table_config, sample_size)
+        table_name = table_config.name
         src_count = source_pool.exec("SELECT COUNT(*) FROM #{source_pool.quote_ident(table_name)}")[0]["count"].to_i
         tgt_count = target_pool.exec("SELECT COUNT(*) FROM #{target_pool.quote_ident(table_name)}")[0]["count"].to_i
 
         mismatches = []
 
         if src_count == tgt_count && src_count > 0
-          # Spot-check: sample random rows by primary key range
-          mismatches = spot_check(source_pool, target_pool, table_name, sample_size)
+          mismatches = spot_check(source_pool, target_pool, table_config, sample_size)
         end
 
         TableResult.new(
@@ -68,40 +68,99 @@ module Pcrd
         )
       end
 
-      def spot_check(source_pool, target_pool, table_name, sample_size)
-        # Sample primary key values from source using ORDER BY random() LIMIT n
-        pk_reader = Schema::Reader.new(source_pool)
-        pk_cols   = pk_reader.primary_key_columns(table_name)
+      # Samples source rows, transforms each into its expected target shape, and
+      # compares the values field-by-field against the matching target row.
+      # This is what catches a transform that silently corrupts data — a row
+      # count match alone does not.
+      def spot_check(source_pool, target_pool, table_config, sample_size)
+        table_name  = table_config.name
+        reader      = Schema::Reader.new(source_pool)
+        source_cols = reader.read(table_name)
+        pk_cols     = reader.primary_key_columns(table_name)
         return [] if pk_cols.empty?
 
-        quoted_table    = source_pool.quote_ident(table_name)
-        pk_select       = pk_cols.map { source_pool.quote_ident(_1) }.join(", ")
+        transformer = Transform::RowTransformer.new(table_config, source_cols)
+        pk_target   = map_pk_to_target(pk_cols, table_config)
 
-        sample_ids = source_pool.exec(
-          "SELECT #{pk_select} FROM #{quoted_table} ORDER BY random() LIMIT $1",
-          [sample_size]
-        ).to_a
+        sample_rows = sample_source_rows(source_pool, table_name, sample_size)
+        return [] if sample_rows.empty?
 
-        return [] if sample_ids.empty?
+        target_table = target_pool.quote_ident(table_name)
+        conditions   = pk_target.each_with_index
+                                .map { |col, i| "#{target_pool.quote_ident(col)} = $#{i + 1}" }
+                                .join(" AND ")
 
         mismatches = []
-        sample_ids.each do |id_row|
-          conditions = pk_cols.each_with_index.map { |col, i|
-            "#{source_pool.quote_ident(col)} = $#{i + 1}"
-          }.join(" AND ")
-          pk_values = pk_cols.map { id_row[_1] }
+        sample_rows.each do |src_row|
+          expected  = transformer.transform(src_row) # { target_col => value }
+          pk_values = pk_cols.map { |col| src_row[col] }
+          pk_desc   = pk_cols.zip(pk_values).map { |c, v| "#{c}=#{v}" }.join(",")
 
-          src_row = source_pool.exec("SELECT * FROM #{quoted_table} WHERE #{conditions}", pk_values).first
-          tgt_row = target_pool.exec("SELECT * FROM #{target_pool.quote_ident(table_name)} WHERE #{conditions}", pk_values).first
+          tgt_row = target_pool.exec(
+            "SELECT * FROM #{target_table} WHERE #{conditions}", pk_values
+          ).first
 
-          next if src_row.nil? && tgt_row.nil?
+          if tgt_row.nil?
+            mismatches << "pk=#{pk_desc}: row missing on target"
+            next
+          end
 
-          if src_row.nil? || tgt_row.nil?
-            mismatches << "pk=#{pk_values.join(',')} exists on #{src_row.nil? ? 'target only' : 'source only'}"
+          expected.each do |col, exp_val|
+            act_val = tgt_row[col]
+            next if values_equal?(exp_val, act_val)
+
+            mismatches << "pk=#{pk_desc} col=#{col}: " \
+                          "source=#{redact(exp_val)} target=#{redact(act_val)}"
           end
         end
 
         mismatches
+      end
+
+      # Samples up to sample_size rows cheaply. ORDER BY random() sorts the whole
+      # table; instead use TABLESAMPLE SYSTEM (page-level random) for large
+      # tables and a plain LIMIT for small ones. Oversample then cap so an
+      # unlucky page selection still tends to fill the sample.
+      def sample_source_rows(pool, table_name, sample_size)
+        quoted = pool.quote_ident(table_name)
+        est    = Schema::Reader.new(pool).estimated_row_count(table_name)
+
+        if est <= sample_size
+          return pool.exec("SELECT * FROM #{quoted} LIMIT $1", [sample_size]).to_a
+        end
+
+        pct  = [[sample_size * 100.0 / est * 3.0, 0.01].max, 100.0].min
+        rows = pool.exec(
+          "SELECT * FROM #{quoted} TABLESAMPLE SYSTEM (#{pct.round(6)}) LIMIT $1",
+          [sample_size]
+        ).to_a
+
+        # TABLESAMPLE can under-fill on small/unlucky page layouts; fall back.
+        rows.empty? ? pool.exec("SELECT * FROM #{quoted} LIMIT $1", [sample_size]).to_a : rows
+      end
+
+      def map_pk_to_target(pk_source_cols, table_config)
+        pk_source_cols.map do |src|
+          spec = table_config.columns&.[](src) || table_config.columns&.[](src.to_sym)
+          spec&.rename || src
+        end
+      end
+
+      # Values come back from libpq as strings (or nil) on both sides, so a
+      # textual comparison correctly treats e.g. int4 99 and int8 99 as equal
+      # while still catching genuinely different values.
+      def values_equal?(expected, actual)
+        return true if expected.nil? && actual.nil?
+        return false if expected.nil? || actual.nil?
+
+        expected.to_s == actual.to_s
+      end
+
+      def redact(val)
+        return "NULL" if val.nil?
+
+        str = val.to_s
+        str.length > 60 ? "#{str[0, 57]}..." : str
       end
 
       def validate_config!
