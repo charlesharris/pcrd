@@ -1,5 +1,12 @@
 # P0 plan — correctness & safety
 
+> **Status: all five issues complete** (branch `p0-correctness-safety`).
+> Suite: 286 examples, 0 failures.
+> 1 ✅ consumer error handling · 2 ✅ concurrent apply + bounded queue ·
+> 3 ✅ value-comparing verify · 4 ✅ centralized quoting/qualification ·
+> 5 ✅ preflight slot count + replica identity + dropped-PK guard.
+
+
 These are the issues that can corrupt data, lose data, or stall a migration
 while reporting success. Each was confirmed against the current source (not the
 external review's snapshot). Ordered by impact × severity, with dependencies
