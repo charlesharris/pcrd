@@ -42,8 +42,8 @@ module Pcrd
 
       def verify_table(source_pool, target_pool, table_config, sample_size)
         table_name = table_config.name
-        src_count = source_pool.exec("SELECT COUNT(*) FROM #{source_pool.quote_ident(table_name)}")[0]["count"].to_i
-        tgt_count = target_pool.exec("SELECT COUNT(*) FROM #{target_pool.quote_ident(table_name)}")[0]["count"].to_i
+        src_count = source_pool.exec("SELECT COUNT(*) FROM #{Sql.quote_table(table_name)}")[0]["count"].to_i
+        tgt_count = target_pool.exec("SELECT COUNT(*) FROM #{Sql.quote_table(table_name)}")[0]["count"].to_i
 
         mismatches = []
 
@@ -85,9 +85,9 @@ module Pcrd
         sample_rows = sample_source_rows(source_pool, table_name, sample_size)
         return [] if sample_rows.empty?
 
-        target_table = target_pool.quote_ident(table_name)
+        target_table = Sql.quote_table(table_name)
         conditions   = pk_target.each_with_index
-                                .map { |col, i| "#{target_pool.quote_ident(col)} = $#{i + 1}" }
+                                .map { |col, i| "#{Sql.quote_ident(col)} = $#{i + 1}" }
                                 .join(" AND ")
 
         mismatches = []
@@ -122,7 +122,7 @@ module Pcrd
       # tables and a plain LIMIT for small ones. Oversample then cap so an
       # unlucky page selection still tends to fill the sample.
       def sample_source_rows(pool, table_name, sample_size)
-        quoted = pool.quote_ident(table_name)
+        quoted = Sql.quote_table(table_name)
         est    = Schema::Reader.new(pool).estimated_row_count(table_name)
 
         if est <= sample_size

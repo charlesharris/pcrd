@@ -137,8 +137,8 @@ RSpec.describe Pcrd::Apply::Engine do
       engine.apply(txn)
 
       set_clause = @sql_calls.first[:sql][/DO UPDATE SET (.+)/, 1]
-      expect(set_clause).not_to include('"id"')
-      expect(set_clause).to include('"score"')
+      expect(set_clause).not_to match(/\bid\b/)
+      expect(set_clause).to match(/\bscore\b = EXCLUDED\.score\b/)
     end
   end
 
@@ -162,8 +162,8 @@ RSpec.describe Pcrd::Apply::Engine do
       engine.apply(txn)
 
       sql = @sql_calls.first[:sql]
-      expect(sql).to include('"description"')
-      expect(sql).not_to match(/"label"/)
+      expect(sql).to match(/\bdescription\b/)
+      expect(sql).not_to match(/\blabel\b/)
     end
   end
 
@@ -185,7 +185,7 @@ RSpec.describe Pcrd::Apply::Engine do
 
       call = @sql_calls.first
       expect(call[:sql]).to match(/DELETE FROM/)
-      expect(call[:sql]).to match(/WHERE.*"id" = \$1/)
+      expect(call[:sql]).to match(/WHERE.*\bid\b = \$1/)
       expect(call[:params]).to eq ["99"]
     end
   end

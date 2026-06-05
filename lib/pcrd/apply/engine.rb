@@ -105,14 +105,14 @@ module Pcrd
       end
 
       def build_upsert_sql(table_name, target_cols, pk_target_cols)
-        tbl  = qi(table_name)
-        cols = target_cols.map { qi(_1) }.join(", ")
+        tbl  = Sql.quote_table(table_name)
+        cols = Sql.quote_columns(target_cols)
         phs  = target_cols.each_index.map { "$#{_1 + 1}" }.join(", ")
-        pk   = pk_target_cols.map { qi(_1) }.join(", ")
+        pk   = Sql.quote_columns(pk_target_cols)
 
         set_pairs = target_cols
           .reject { |c| pk_target_cols.include?(c) }
-          .map    { |c| "#{qi(c)} = EXCLUDED.#{qi(c)}" }
+          .map    { |c| "#{Sql.quote_ident(c)} = EXCLUDED.#{Sql.quote_ident(c)}" }
           .join(", ")
 
         if set_pairs.empty?
@@ -123,14 +123,11 @@ module Pcrd
       end
 
       def build_delete_sql(table_name, pk_target_cols)
-        tbl  = qi(table_name)
-        cond = pk_target_cols.each_with_index.map { |c, i| "#{qi(c)} = $#{i + 1}" }.join(" AND ")
+        tbl  = Sql.quote_table(table_name)
+        cond = pk_target_cols.each_with_index
+                             .map { |c, i| "#{Sql.quote_ident(c)} = $#{i + 1}" }
+                             .join(" AND ")
         "DELETE FROM #{tbl} WHERE #{cond}"
-      end
-
-      # Minimal identifier quoting (double-quote + escape internal double-quotes).
-      def qi(name)
-        "\"#{name.to_s.gsub('"', '""')}\""
       end
     end
   end

@@ -37,17 +37,17 @@ module Pcrd
       end
 
       private_class_method def self.render(columns, table_name, schema_name, pk_columns)
-        name_w = columns.map { |c| c.name.length }.max.to_i
+        name_w = columns.map { |c| Sql.quote_ident(c.name).length }.max.to_i
         type_w = columns.map { |c| c.display_type.length }.max.to_i
 
         lines = columns.map { |c| column_line(c, name_w, type_w) }
-        lines << "  PRIMARY KEY (#{pk_columns.join(', ')})" if pk_columns.any?
+        lines << "  PRIMARY KEY (#{Sql.quote_columns(pk_columns)})" if pk_columns.any?
 
-        "CREATE TABLE #{schema_name}.#{table_name} (\n#{lines.join(",\n")}\n)"
+        "CREATE TABLE #{Sql.quote_table(table_name, schema: schema_name)} (\n#{lines.join(",\n")}\n)"
       end
 
       private_class_method def self.column_line(col, name_w, type_w)
-        parts = ["  #{col.name.ljust(name_w)}  #{col.display_type.ljust(type_w)}"]
+        parts = ["  #{Sql.quote_ident(col.name).ljust(name_w)}  #{col.display_type.ljust(type_w)}"]
         parts << "NOT NULL" unless col.nullable
         # Omit nextval() defaults — they reference source sequences.
         # Identity columns (GENERATED ALWAYS AS IDENTITY) are also omitted;

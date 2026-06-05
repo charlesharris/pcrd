@@ -65,8 +65,8 @@ module Pcrd
         rule = TypeMap.validated_rule(source_col.type_name, target_type)
         return nil unless rule
 
-        quoted_col   = @pool.quote_ident(col_name.to_s)
-        quoted_table = @pool.quote_ident(table_name)
+        quoted_col   = Sql.quote_ident(col_name.to_s)
+        quoted_table = Sql.quote_table(table_name)
 
         count = if rule[:check_expr] == :varchar_length_check
                   varchar_length_check(quoted_table, quoted_col, target_type)

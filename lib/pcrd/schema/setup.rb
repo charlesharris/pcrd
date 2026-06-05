@@ -18,9 +18,7 @@ module Pcrd
       # Returns the slot's starting LSN as a "X/Y" string — pass this to the
       # consumer so streaming begins from a point that covers all of backfill.
       def create_publication_and_slot(pub_name:, slot_name:)
-        table_list = @config.migrate.tables.map { |t|
-          "#{@source_pool.quote_ident("public")}.#{@source_pool.quote_ident(t.name)}"
-        }.join(", ")
+        table_list = @config.migrate.tables.map { |t| Sql.quote_table(t.name) }.join(", ")
 
         @source_pool.exec_sql(
           "CREATE PUBLICATION #{@source_pool.quote_ident(pub_name)} FOR TABLE #{table_list}"
@@ -65,7 +63,7 @@ module Pcrd
           target_reader = Reader.new(@target_pool)
           if target_reader.table_exists?(name)
             if force_overwrite
-              @target_pool.exec_sql("DROP TABLE IF EXISTS public.#{name} CASCADE")
+              @target_pool.exec_sql("DROP TABLE IF EXISTS #{Sql.quote_table(name)} CASCADE")
             else
               raise "Table '#{name}' already exists on target. " \
                     "Pass --force-overwrite to drop and recreate."

@@ -197,6 +197,32 @@ RSpec.describe Pcrd::Schema::DDL do
       end
     end
 
+    context "with reserved-word and mixed-case identifiers" do
+      let(:tricky_columns) do
+        [
+          col("id",    type_name: "int4", formatted_type: "integer", nullable: false),
+          col("order", type_name: "int4", formatted_type: "integer"),
+          col("MyCol", type_name: "text", formatted_type: "text", alignment: 4, fixed_size: nil)
+        ]
+      end
+
+      subject(:ddl) do
+        described_class.generate(
+          source_columns:      tricky_columns,
+          table_config:        table_config(name: "select"),
+          primary_key_columns: ["id"]
+        )
+      end
+
+      it "quotes reserved words and mixed-case names but not safe ones" do
+        expect(ddl).to start_with('CREATE TABLE public."select" (')
+        expect(ddl).to match(/"order"\s+integer/)
+        expect(ddl).to match(/"MyCol"\s+text/)
+        expect(ddl).to match(/^  id\s+integer\s+NOT NULL/)
+        expect(ddl).to include("PRIMARY KEY (id)")
+      end
+    end
+
     context "with nextval() default (identity column)" do
       let(:id_with_sequence) do
         [col("id", type_name: "int4", formatted_type: "integer",
