@@ -61,6 +61,13 @@ module Pcrd
         @mutex.synchronize { @stop }
       end
 
+      # True if the streaming thread exited because of an error. The apply
+      # side polls this when the queue drains empty so a dead consumer
+      # surfaces as a failure instead of looking like "caught up and idle".
+      def failed?
+        @mutex.synchronize { !@last_error.nil? }
+      end
+
       # Called by the apply engine after a transaction has been applied.
       # Updates the LSN we report back to the server (WAL reclaim point).
       def advance_lsn(lsn_string)
@@ -95,8 +102,12 @@ module Pcrd
           end
         end
       rescue => e
-        @last_error = e
-        @queue.push(Transaction.new(begin_msg: nil, events: [], commit_lsn: "__error__:#{e.message}"))
+        # Record the failure and let the thread exit. We deliberately do NOT
+        # enqueue anything: a malformed transaction here would be applied as a
+        # no-op and its sentinel "LSN" checkpointed, hiding the failure. The
+        # apply loop detects the dead consumer via #failed? once the queue
+        # drains and raises Replication::Error.
+        @mutex.synchronize { @last_error = e }
       end
 
       def dispatch(raw)

@@ -218,14 +218,22 @@ module Pcrd
       loop do
         break if stop_requested
 
-        # Drain one transaction from queue (non-blocking)
-        txn = consumer.queue.pop(true)
-        apply_engine.apply(txn)
-        consumer.advance_lsn(txn.commit_lsn)
-        checkpoint.set_lsn(txn.commit_lsn)
+        txn = next_transaction(consumer)
 
-      rescue ThreadError
-        # Queue is empty — check lag and sleep briefly
+        if txn
+          apply_engine.apply(txn)
+          consumer.advance_lsn(txn.commit_lsn)
+          checkpoint.set_lsn(txn.commit_lsn)
+          next
+        end
+
+        # Queue drained empty. If the consumer thread died, surface it —
+        # a dead consumer must not be mistaken for "caught up and idle".
+        if consumer.failed?
+          raise Replication::Error, "WAL consumer stopped: #{consumer.last_error.message}"
+        end
+
+        # Genuinely caught up — show lag and sleep briefly.
         now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         if now - last_lag_check >= lag_check_interval
           lag = lag_monitor.lag_bytes
@@ -246,6 +254,8 @@ module Pcrd
         say "Migration interrupted. Resume with:", :yellow
         say "  pcrd migrate --config #{options[:config] || Config::DEFAULT_CONFIG_FILE} --resume", :yellow
       end
+    rescue Replication::Error => e
+      raise Thor::Error, "ERROR: #{e.message}\n\nReplication stopped. Resume with --resume once the cause is resolved."
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
     rescue RuntimeError => e
@@ -389,6 +399,14 @@ module Pcrd
 
     def require_config!
       load_config!
+    end
+
+    # Non-blocking pop of the next buffered transaction, or nil if the queue
+    # is currently empty. Keeps queue-empty out of the loop's exception path.
+    def next_transaction(consumer)
+      consumer.queue.pop(true)
+    rescue ThreadError
+      nil
     end
 
     def print_batch_progress(stats)

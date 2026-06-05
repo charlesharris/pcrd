@@ -17,6 +17,9 @@ module Pcrd
     # the backfill skips straight past it. It also powers throughput
     # stats and ETA estimates.
     class Store
+      # A PostgreSQL LSN is two hex segments joined by a slash, e.g. "16/B374D848".
+      LSN_FORMAT = /\A[0-9A-Fa-f]+\/[0-9A-Fa-f]+\z/
+
       SCHEMA_SQL = <<~SQL.freeze
         CREATE TABLE IF NOT EXISTS metadata (
           key   TEXT PRIMARY KEY,
@@ -64,6 +67,10 @@ module Pcrd
       end
 
       def set_lsn(lsn)
+        unless lsn.is_a?(String) && lsn.match?(LSN_FORMAT)
+          raise ArgumentError, "invalid LSN: #{lsn.inspect}"
+        end
+
         set_meta("current_lsn", lsn)
       end
 

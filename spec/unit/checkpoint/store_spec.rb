@@ -44,6 +44,12 @@ RSpec.describe Pcrd::Checkpoint::Store do
       expect(store.backfill_start_lsn).to eq "0/1A000000"
       expect(store.lsn).to eq "0/2B000000"
     end
+
+    it "rejects a malformed LSN rather than persisting garbage" do
+      expect { store.set_lsn("__error__:boom") }.to raise_error(ArgumentError, /invalid LSN/)
+      expect { store.set_lsn(nil) }.to raise_error(ArgumentError, /invalid LSN/)
+      expect(store.lsn).to be_nil
+    end
   end
 
   describe "batch recording" do

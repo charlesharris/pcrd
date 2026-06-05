@@ -152,14 +152,14 @@ RSpec.describe "streaming pipeline (integration)", :integration do
     while Time.now < deadline
       begin
         txn = consumer.queue.pop(true)
-        if txn.commit_lsn.start_with?("__error__:")
-          raise "Consumer thread error: #{txn.commit_lsn[10..]} " \
-                "(#{consumer.last_error&.class}: #{consumer.last_error&.message})"
-        end
         apply_engine.apply(txn)
         consumer.advance_lsn(txn.commit_lsn)
         last_arrival = Time.now
       rescue ThreadError
+        if consumer.failed?
+          raise "Consumer thread error: " \
+                "#{consumer.last_error&.class}: #{consumer.last_error&.message}"
+        end
         break if last_arrival && Time.now - last_arrival > settle
         sleep 0.05
       end
