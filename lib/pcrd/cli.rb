@@ -127,8 +127,14 @@ module Pcrd
         say "  Target tables created.", :green
       end
 
-      # ── WAL consumer thread (streaming mode only) ──────────────────────
-      consumer = nil
+      # ── WAL consumer + concurrent apply (streaming mode only) ──────────
+      # The consumer streams WAL into a bounded queue; the apply worker drains
+      # it on its own connection, concurrently with backfill, so the source
+      # slot keeps advancing instead of retaining WAL for the whole backfill.
+      consumer     = nil
+      apply_worker = nil
+      apply_pool   = nil
+
       unless options[:"backfill-only"]
         repl_conn = Connection::Replication.new(config.source)
         parser    = Replication::Pgoutput::Parser.new
@@ -142,9 +148,31 @@ module Pcrd
         say "\nStarting WAL consumer..."
         consumer.start
         say "  Streaming from #{start_lsn}.", :green
+
+        # Apply runs on its own target connection — Connection::Pool wraps a
+        # single PG connection and must not be shared with backfill's writes.
+        apply_pool   = Connection::Pool.new(config.target)
+        apply_engine = Apply::Engine.new(
+          target_pool:   apply_pool,
+          config:        config,
+          parser:        parser,
+          source_schema: read_source_schema(source_pool, config)
+        )
+        apply_worker = Apply::Worker.new(
+          engine: apply_engine,
+          queue:  consumer.queue,
+          # Acknowledge to the source only after the transaction is durably
+          # applied and checkpointed, so WAL is not released prematurely.
+          on_committed: lambda { |lsn|
+            checkpoint.set_lsn(lsn)
+            consumer.advance_lsn(lsn)
+          }
+        )
+        apply_worker.start
+        say "  Applying WAL concurrently with backfill.", :green
       end
 
-      # ── Backfill ───────────────────────────────────────────────────────
+      # ── Backfill (runs concurrently with the apply worker) ─────────────
       backfill_engine = Backfill::Engine.new(
         source_pool: source_pool,
         target_pool: target_pool,
@@ -165,11 +193,12 @@ module Pcrd
         say "  #{r.table_name}: #{format_count(r.rows_copied)} rows in #{r.batch_count} batches#{status}", :green
       end
 
+      # An apply failure during backfill must abort, not be silently ignored.
+      if apply_worker&.failed?
+        raise Replication::Error, "Apply worker stopped: #{apply_worker.error.message}"
+      end
+
       if bf_results.any?(&:stopped_early) || stop_requested
-        consumer&.stop
-        checkpoint.close
-        source_pool.close
-        target_pool.close
         say "\nInterrupted. Resume with --resume.", :yellow
         return
       end
@@ -177,31 +206,12 @@ module Pcrd
       say "\nBackfill complete.", :green
 
       if options[:"backfill-only"]
-        consumer&.stop
-        checkpoint.close
-        source_pool.close
-        target_pool.close
         say "Run `pcrd verify` to check row counts, then `pcrd cutover` when ready."
         return
       end
 
-      # ── Apply engine: drain buffered events + keep streaming ───────────
+      # ── Streaming mode: the worker keeps applying; we monitor lag ──────
       say "Entering streaming mode. Press Ctrl-C to stop.\n"
-
-      source_schema = bf_results.each_with_object({}) do |r, h|
-        reader = Schema::Reader.new(source_pool)
-        h[r.table_name] = {
-          columns:    reader.read(r.table_name),
-          pk_columns: reader.primary_key_columns(r.table_name)
-        }
-      end
-
-      apply_engine = Apply::Engine.new(
-        target_pool:   target_pool,
-        config:        config,
-        parser:        parser,
-        source_schema: source_schema
-      )
 
       lag_monitor = Monitor::Lag.new(
         source_pool: source_pool,
@@ -218,22 +228,14 @@ module Pcrd
       loop do
         break if stop_requested
 
-        txn = next_transaction(consumer)
-
-        if txn
-          apply_engine.apply(txn)
-          consumer.advance_lsn(txn.commit_lsn)
-          checkpoint.set_lsn(txn.commit_lsn)
-          next
+        # Surface a dead worker or consumer instead of spinning forever.
+        if apply_worker.failed?
+          raise Replication::Error, "Apply worker stopped: #{apply_worker.error.message}"
         end
-
-        # Queue drained empty. If the consumer thread died, surface it —
-        # a dead consumer must not be mistaken for "caught up and idle".
-        if consumer.failed?
+        if consumer.failed? && consumer.queue.empty?
           raise Replication::Error, "WAL consumer stopped: #{consumer.last_error.message}"
         end
 
-        # Genuinely caught up — show lag and sleep briefly.
         now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         if now - last_lag_check >= lag_check_interval
           lag = lag_monitor.lag_bytes
@@ -261,7 +263,11 @@ module Pcrd
     rescue RuntimeError => e
       raise Thor::Error, "ERROR: #{e.message}"
     ensure
+      # Stop the producer first so the queue is finite, then let the worker
+      # drain what's left before closing its connection.
       consumer&.stop rescue nil
+      apply_worker&.stop rescue nil
+      apply_pool&.close rescue nil
       checkpoint&.close rescue nil
       source_pool&.close rescue nil
       target_pool&.close rescue nil
@@ -401,12 +407,16 @@ module Pcrd
       load_config!
     end
 
-    # Non-blocking pop of the next buffered transaction, or nil if the queue
-    # is currently empty. Keeps queue-empty out of the loop's exception path.
-    def next_transaction(consumer)
-      consumer.queue.pop(true)
-    rescue ThreadError
-      nil
+    # Reads source columns + PK for every migrated table, keyed by table name.
+    # Built once before the apply worker starts so it can run on its own thread.
+    def read_source_schema(source_pool, config)
+      reader = Schema::Reader.new(source_pool)
+      (config.migrate&.tables || []).each_with_object({}) do |table, h|
+        h[table.name] = {
+          columns:    reader.read(table.name),
+          pk_columns: reader.primary_key_columns(table.name)
+        }
+      end
     end
 
     def print_batch_progress(stats)

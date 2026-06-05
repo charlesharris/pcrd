@@ -27,13 +27,22 @@ module Pcrd
       KEEPALIVE_INTERVAL = 10   # seconds between proactive keepalives to server
       WAIT_TIMEOUT       = 1    # max seconds per wait_readable; limits stop latency
 
-      def initialize(repl_conn:, parser:, slot_name:, pub_name:, start_lsn: "0/0")
+      # Backpressure cap. The queue holds at most this many buffered
+      # transactions; once full, the stream loop stops reading new WAL (the
+      # server's flow control kicks in) until the apply side drains it. This
+      # bounds memory during a long backfill instead of letting the queue grow
+      # without limit. Tuned via :max_queue.
+      DEFAULT_MAX_QUEUE  = 10_000
+      FULL_QUEUE_BACKOFF = 0.05 # seconds to wait between retries when full
+
+      def initialize(repl_conn:, parser:, slot_name:, pub_name:, start_lsn: "0/0",
+                     max_queue: DEFAULT_MAX_QUEUE)
         @repl      = repl_conn
         @parser    = parser
         @slot_name = slot_name
         @pub_name  = pub_name
         @start_lsn = start_lsn
-        @queue     = Thread::Queue.new
+        @queue     = SizedQueue.new(max_queue)
         @stop      = false
         @mutex     = Mutex.new
         @conf_lsn  = 0   # last applied LSN (int64); advanced by apply engine
@@ -139,7 +148,7 @@ module Pcrd
 
         when Pgoutput::Messages::Commit
           unless @current_events.empty?
-            @queue.push(Transaction.new(
+            enqueue(Transaction.new(
               begin_msg:  @current_begin,
               events:     @current_events.dup,
               commit_lsn: msg.lsn
@@ -149,6 +158,24 @@ module Pcrd
           @current_events = []
 
         # Relation and Type are cached by the parser; no action needed here.
+        end
+      end
+
+      # Pushes a transaction onto the bounded queue. If the queue is full the
+      # apply side is behind, so we wait — but keep answering the server with
+      # keepalives so it does not drop us past wal_sender_timeout while we
+      # apply backpressure. Returns early if stop is requested.
+      def enqueue(txn)
+        loop do
+          return if stopped?
+
+          begin
+            @queue.push(txn, true) # non-blocking; raises ThreadError when full
+            return
+          rescue ThreadError
+            send_status
+            sleep FULL_QUEUE_BACKOFF
+          end
         end
       end
 

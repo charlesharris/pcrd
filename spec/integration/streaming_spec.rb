@@ -238,4 +238,50 @@ RSpec.describe "streaming pipeline (integration)", :integration do
       expect(count).to eq 3
     end
   end
+
+  describe "Apply::Worker (concurrent apply)" do
+    it "applies streamed events on its own thread and acknowledges the LSN" do
+      consumer = create_slot_and_consumer
+
+      # The worker must apply on a connection it does not share with the
+      # assertions below (Connection::Pool wraps a single PG connection).
+      worker_pool  = Pcrd::Connection::Pool.new(
+        Pcrd::Config::Connection.new(
+          host:     ENV.fetch("PCRD_TEST_TARGET_HOST",     "localhost"),
+          port:     ENV.fetch("PCRD_TEST_TARGET_PORT",     "5434").to_i,
+          database: ENV.fetch("PCRD_TEST_TARGET_DB",       "pcrd_target"),
+          user:     ENV.fetch("PCRD_TEST_TARGET_USER",     "postgres"),
+          password: ENV.fetch("PCRD_TEST_TARGET_PASSWORD", "postgres")
+        )
+      )
+      apply_engine = Pcrd::Apply::Engine.new(
+        target_pool:   worker_pool,
+        config:        config,
+        parser:        consumer.parser,
+        source_schema: source_schema
+      )
+      acked  = []
+      worker = Pcrd::Apply::Worker.new(
+        engine: apply_engine, queue: consumer.queue,
+        on_committed: ->(lsn) { acked << lsn; consumer.advance_lsn(lsn) }
+      )
+      worker.start
+
+      source_pool.exec("INSERT INTO pcrd_stream_test VALUES ($1, $2, $3)", [1, "hello", 99])
+      source_pool.exec("INSERT INTO pcrd_stream_test VALUES ($1, $2, $3)", [2, "world", 7])
+
+      deadline = Time.now + 5
+      sleep 0.05 until acked.size >= 2 || Time.now > deadline
+
+      consumer.stop
+      worker.stop
+
+      expect(worker.failed?).to be(false)
+      expect(acked.size).to be >= 2
+      rows = target_pool.exec("SELECT id, label, score FROM pcrd_stream_test ORDER BY id").to_a
+      expect(rows.map { |r| r["label"] }).to eq(%w[hello world])
+    ensure
+      worker_pool&.close
+    end
+  end
 end
