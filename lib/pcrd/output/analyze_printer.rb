@@ -155,11 +155,7 @@ module Pcrd
 
       def render_table(headers, rows)
         table    = TTY::Table.new(header: headers, rows: rows)
-        # Use at least 160 cols so wide tables (the 5-column diff view) never
-        # collapse to vertical orientation. Cap at actual terminal width when
-        # that's even wider.
-        width    = [TTY::Screen.width, 160].max
-        rendered = table.render(:unicode, padding: [0, 1], resize: true, width: width) do |r|
+        rendered = table.render(:unicode, padding: [0, 1]) do |r|
           r.border.separator = :each_row
         end
         rendered.each_line { @out.puts "  #{_1.chomp}" }
