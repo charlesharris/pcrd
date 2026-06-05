@@ -4,10 +4,6 @@ require "yaml"
 
 module Pcrd
   module Config
-    class LoadError < StandardError; end
-
-    DEFAULT_CONFIG_FILE = "pcrd.config.yml"
-
     MIGRATE_DEFAULTS = {
       batch_size: 10_000,
       lag_threshold_bytes: 1_048_576,        # 1 MB

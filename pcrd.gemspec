@@ -18,7 +18,7 @@ Gem::Specification.new do |spec|
   spec.homepage = "https://github.com/charris/pcrd"
   spec.required_ruby_version = ">= 3.2.0"
 
-  spec.files = Dir["lib/**/*", "exe/*", "README.md"]
+  spec.files = Dir["lib/**/*", "bin/*", "README.md"]
   spec.executables = ["pcrd"]
   spec.require_paths = ["lib"]
 

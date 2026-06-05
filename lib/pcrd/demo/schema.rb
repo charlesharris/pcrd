@@ -93,14 +93,14 @@ module Pcrd
           port: 5433
           database: pcrd_source
           user: postgres
-          # password via PCRD_SOURCE_PASSWORD env var or ~/.pgpass
+          password: postgres
 
         target:
           host: localhost
           port: 5434
           database: pcrd_target
           user: postgres
-          # password via PCRD_TARGET_PASSWORD env var or ~/.pgpass
+          password: postgres
 
         migrate:
           tables:

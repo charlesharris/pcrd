@@ -64,13 +64,22 @@ App  ──── DATABASE_URL ────────────────�
 
 ## Installation
 
+**From RubyGems** (once published):
 ```bash
-gem install pcrd          # once published
-# or, from source:
+gem install pcrd
+```
+
+**From source:**
+```bash
 git clone https://github.com/charris/pcrd
 cd pcrd
 bundle install
+gem build pcrd.gemspec
+gem install pcrd-0.1.0.gem
+pcrd --version
 ```
+
+> `bundle install` installs dependencies only — it does not put `pcrd` on your PATH. The `gem build` + `gem install` steps are required. If you just want to run pcrd without installing, use `bundle exec bin/pcrd` from the repo root.
 
 ---
 
@@ -494,6 +503,10 @@ git clone https://github.com/charris/pcrd
 cd pcrd
 bundle install
 
+# Build and install the gem so `pcrd` is on your PATH
+gem build pcrd.gemspec
+gem install pcrd-0.1.0.gem
+
 # Start dev PostgreSQL containers
 docker compose -f dev/docker-compose.yml up -d
 
@@ -510,6 +523,8 @@ pcrd analyze
 pcrd migrate --preflight-only
 pcrd migrate --backfill-only --yes
 ```
+
+> After making code changes locally, re-run `gem build pcrd.gemspec && gem install pcrd-0.1.0.gem` to pick them up, or use `bundle exec bin/pcrd` to run from source without reinstalling.
 
 ### Test environment
 
