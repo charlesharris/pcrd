@@ -113,6 +113,46 @@ RSpec.describe Pcrd::Preflight, :integration do
         expect(result.ddl_map["pcrd_preflight_test"]).to include("CREATE TABLE")
         expect(result.ddl_map["pcrd_preflight_test"]).to include("bigint")
       end
+
+      it "passes the replica identity check (default = primary key)" do
+        config = make_config(tables: tables)
+        result = described_class.new(config).run
+        item = result.items.find { |i| i.label.include?("replica identity") }
+        expect(item.status).to eq :pass
+        expect(item.detail).to include("default")
+      end
+
+      it "needs only one replication slot for the whole migration" do
+        config = make_config(tables: tables)
+        result = described_class.new(config).run
+        slot_item = result.items.find { |i| i.label == "replication slots" }
+        expect(slot_item.detail).to include("1 needed")
+      end
+    end
+
+    context "when the source table has REPLICA IDENTITY NOTHING" do
+      let(:tables) { [table_config(name: "pcrd_preflight_test", columns: { "id" => col_spec(type: "bigint") })] }
+
+      it "fails the replica identity check" do
+        source_pool.exec_sql("ALTER TABLE pcrd_preflight_test REPLICA IDENTITY NOTHING")
+        config = described_class.new(make_config(tables: tables)).run
+        item = config.items.find { |i| i.label.include?("replica identity") }
+        expect(item.status).to eq :fail
+        expect(item.detail).to include("REPLICA IDENTITY NOTHING")
+        expect(config.passed).to be false
+      end
+    end
+
+    context "when a primary key column is dropped in the spec" do
+      let(:tables) { [table_config(name: "pcrd_preflight_test", columns: { "id" => col_spec(drop: true) })] }
+
+      it "fails because the PK is needed to match replicated changes" do
+        result = described_class.new(make_config(tables: tables)).run
+        pk_fail = result.items.find { |i| i.label.include?("primary key") && i.status == :fail }
+        expect(pk_fail).not_to be_nil
+        expect(pk_fail.detail).to include("cannot be dropped")
+        expect(result.passed).to be false
+      end
     end
 
     context "when a spec column does not exist on source" do

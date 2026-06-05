@@ -45,6 +45,22 @@ module Pcrd
         result.column_values(0)
       end
 
+      # Returns the table's replica identity setting as a single char:
+      #   'd' default (primary key)   'n' nothing
+      #   'f' full (whole row)        'i' a specific unique index
+      # Returns nil if the table is not found. This governs whether UPDATE/DELETE
+      # WAL records carry the old-row key columns the apply engine needs.
+      def replica_identity(table_name, schema_name: "public")
+        result = @pool.exec(<<~SQL, [table_name, schema_name])
+          SELECT c.relreplident
+          FROM   pg_class c
+          JOIN   pg_namespace n ON n.oid = c.relnamespace
+          WHERE  c.relname = $1
+            AND  n.nspname = $2
+        SQL
+        result.ntuples > 0 ? result[0]["relreplident"] : nil
+      end
+
       # Returns the estimated live row count from pg_class statistics.
       def estimated_row_count(table_name, schema_name: "public")
         result = @pool.exec(<<~SQL, [table_name, schema_name])

@@ -100,7 +100,9 @@ module Pcrd
       max_slots = max_row[0]["setting"].to_i
       used      = used_row[0]["count"].to_i
       free      = max_slots - used
-      needed    = (@config.migrate&.tables&.length || 1)
+      # pcrd creates one logical slot per migration covering all tables (via a
+      # single publication), not one slot per table.
+      needed    = 1
 
       if free >= needed
         pass("replication slots", "#{used} used / #{max_slots} max  (#{free} free, #{needed} needed)")
@@ -139,6 +141,8 @@ module Pcrd
               "semantics during the backfill/streaming overlap window")
       else
         pass("#{name}: primary key", pk_cols.join(", "))
+        check_pk_not_dropped(name, table_config, pk_cols)
+        check_replica_identity(name)
       end
 
       # 3. Target table must not exist (unless --force-overwrite)
@@ -159,6 +163,39 @@ module Pcrd
       )
     rescue Connection::Error => e
       fail!("#{name}", "database error: #{e.message}")
+    end
+
+    # A primary-key column cannot be dropped: the apply engine matches replayed
+    # UPDATE/DELETE events by primary key, so dropping one breaks streaming.
+    def check_pk_not_dropped(name, table_config, pk_cols)
+      dropped = pk_cols.select do |col|
+        spec = table_config.columns&.[](col) || table_config.columns&.[](col.to_sym)
+        spec&.drop
+      end
+      return if dropped.empty?
+
+      fail!("#{name}: primary key",
+            "primary key column(s) cannot be dropped: #{dropped.join(', ')} — " \
+            "they are required to match replicated updates and deletes")
+    end
+
+    # The source table's replica identity must carry key columns on UPDATE/DELETE
+    # or the apply engine cannot locate the target row to update/delete.
+    def check_replica_identity(name)
+      ident = Schema::Reader.new(@source_pool).replica_identity(name)
+
+      case ident
+      when "d" then pass("#{name}: replica identity", "default (primary key)")
+      when "f" then pass("#{name}: replica identity", "full")
+      when "i" then pass("#{name}: replica identity", "index")
+      when "n"
+        fail!("#{name}: replica identity",
+              "REPLICA IDENTITY NOTHING — UPDATE/DELETE WAL records carry no key " \
+              "columns, so replicated updates and deletes cannot be applied. " \
+              "Run: ALTER TABLE #{Sql.quote_table(name)} REPLICA IDENTITY DEFAULT (or FULL).")
+      else
+        warn("#{name}: replica identity", "unrecognized setting #{ident.inspect}")
+      end
     end
 
     def check_target_table(name, _table_config)
