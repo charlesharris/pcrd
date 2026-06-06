@@ -10,6 +10,14 @@ module Pcrd
     # replication protocol commands. Use open → start_replication, then
     # poll with get_copy_data / respond with put_copy_data.
     class Replication
+      # START_REPLICATION is replication-protocol SQL, not ordinary SQL: the
+      # slot name and LSN are interpolated as bare tokens, so they must be
+      # validated rather than quoted. Slot names follow PostgreSQL's own rule
+      # (lowercase letters, digits, underscore; max 63). LSN is the standard
+      # hex/hex form. Both are config/checkpoint-derived, so validate them.
+      SLOT_NAME_RE = /\A[a-z0-9_]{1,63}\z/
+      LSN_RE       = %r{\A[0-9A-Fa-f]{1,8}/[0-9A-Fa-f]{1,8}\z}
+
       def initialize(config)
         @config = config
         @conn   = nil
@@ -35,6 +43,8 @@ module Pcrd
       # Uses send_query + get_result (not exec) so the CopyBoth response is
       # handled correctly and the connection is left in streaming copy mode.
       def start_replication(slot_name:, pub_name:, start_lsn: "0/0")
+        validate_slot_name!(slot_name)
+        validate_lsn!(start_lsn)
         pub_id = pub_name.gsub("'", "''")
 
         @conn.send_query(
@@ -76,6 +86,22 @@ module Pcrd
 
       def connected?
         @conn && !@conn.finished?
+      end
+
+      private
+
+      def validate_slot_name!(slot_name)
+        return if slot_name.to_s.match?(SLOT_NAME_RE)
+
+        raise Error,
+              "Invalid replication slot name #{slot_name.inspect}: must be 1-63 " \
+              "characters of lowercase letters, digits, or underscores."
+      end
+
+      def validate_lsn!(lsn)
+        return if lsn.to_s.match?(LSN_RE)
+
+        raise Error, "Invalid start LSN #{lsn.inspect}: expected hex/hex form like \"0/0\"."
       end
     end
   end

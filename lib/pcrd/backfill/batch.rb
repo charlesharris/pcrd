@@ -79,18 +79,58 @@ module Pcrd
 
       # ── target COPY ──────────────────────────────────────────────────────
 
+      # COPY the batch into a session-local staging table, then merge into the
+      # real target with ON CONFLICT DO NOTHING.
+      #
+      # COPY itself has no conflict handling, so copying straight into the
+      # PK-constrained target would abort the moment the apply worker has
+      # already written a row in this key range during the backfill/streaming
+      # overlap. Merging via staging makes the bulk load idempotent and safe to
+      # run concurrently with apply: any row the worker already wrote (an
+      # insert/update replayed for a post-slot change) is left untouched. WAL
+      # replay is authoritative for changes after slot creation; backfill only
+      # fills the rows it has not seen.
       def copy_to_target(transformed_rows)
         target_cols = @transformer.target_column_names
-        quoted_tgt  = "#{@target_pool.quote_ident(@schema_name)}.#{@target_pool.quote_ident(@table_name)}"
         col_list    = target_cols.map { |c| @target_pool.quote_ident(c) }.join(", ")
-        copy_sql    = "COPY #{quoted_tgt} (#{col_list}) FROM STDIN WITH (FORMAT text)"
 
+        ensure_stage_table
+        @target_pool.exec_sql("TRUNCATE #{stage_ident}")
+
+        copy_sql = "COPY #{stage_ident} (#{col_list}) FROM STDIN WITH (FORMAT text)"
         @target_pool.copy_data(copy_sql) do |conn|
           transformed_rows.each do |row|
             values = target_cols.map { |col| encode_copy_value(row[col]) }
             conn.put_copy_data(values.join(DELIMITER) + "\n")
           end
         end
+
+        @target_pool.exec_sql(
+          "INSERT INTO #{quoted_target} (#{col_list}) " \
+          "SELECT #{col_list} FROM #{stage_ident} ON CONFLICT DO NOTHING"
+        )
+      end
+
+      def quoted_target
+        @quoted_target ||=
+          "#{@target_pool.quote_ident(@schema_name)}.#{@target_pool.quote_ident(@table_name)}"
+      end
+
+      # Session-local TEMP table (pg_temp resolves before the search_path, so it
+      # needs no schema qualifier). Created once per Batch and reused across this
+      # table's batches; TRUNCATEd before each load.
+      def stage_ident
+        @stage_ident ||= @target_pool.quote_ident("pcrd_stage_#{@table_name}")
+      end
+
+      def ensure_stage_table
+        return if @stage_ready
+
+        @target_pool.exec_sql(
+          "CREATE TEMP TABLE IF NOT EXISTS #{stage_ident} " \
+          "(LIKE #{quoted_target} INCLUDING DEFAULTS)"
+        )
+        @stage_ready = true
       end
 
       # ── helpers ──────────────────────────────────────────────────────────

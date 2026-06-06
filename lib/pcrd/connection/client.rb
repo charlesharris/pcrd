@@ -53,6 +53,9 @@ module Pcrd
       def copy_data(sql)
         connection.copy_data(sql) { yield connection }
       rescue PG::Error => e
+        # A failed COPY can leave the connection mid-COPY or in an aborted
+        # transaction; reset it like exec/exec_sql so the next call is usable.
+        reset_connection!
         raise Error, e.message
       end
 

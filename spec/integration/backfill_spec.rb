@@ -163,6 +163,30 @@ RSpec.describe "Backfill::Engine (integration)", :integration do
     end
   end
 
+  describe "overlap with concurrent apply" do
+    it "does not abort on a row the apply worker already wrote, and preserves its value" do
+      seed_source(50)
+
+      # Simulate the apply worker having already upserted id=10 with a newer
+      # value during the backfill/streaming overlap. A direct COPY into the
+      # PK-constrained target would abort here; the staging+merge path must
+      # skip the row instead and leave the apply-written value intact.
+      target_pool.exec(
+        "INSERT INTO pcrd_backfill_test (id, label, score) VALUES ($1::bigint, $2, $3::bigint)",
+        [10, "from_apply", 999]
+      )
+
+      expect { engine.run }.not_to raise_error
+
+      count = target_pool.exec("SELECT COUNT(*) FROM pcrd_backfill_test")[0]["count"].to_i
+      expect(count).to eq 50
+
+      row = target_pool.exec("SELECT label, score FROM pcrd_backfill_test WHERE id = 10").first
+      expect(row["label"]).to eq "from_apply" # apply wins; backfill did not overwrite
+      expect(row["score"]).to eq "999"
+    end
+  end
+
   describe "batching" do
     it "uses the configured batch size" do
       seed_source(250)
