@@ -46,10 +46,22 @@ module Pcrd
         @stop      = false
         @mutex     = Mutex.new
         @conf_lsn  = 0   # last applied LSN (int64); advanced by apply engine
+        @last_received_lsn = nil # commit LSN of the most recently buffered txn
         @thread    = nil
       end
 
       attr_reader :queue, :parser, :last_error
+
+      # Commit LSN of the most recent transaction buffered onto the queue, for
+      # observability ("how far has streaming read?"). nil until the first txn.
+      def last_received_lsn
+        @mutex.synchronize { @last_received_lsn }
+      end
+
+      # Number of buffered transactions waiting to be applied (backpressure gauge).
+      def queue_depth
+        @queue.size
+      end
 
       # Opens the replication connection and starts the background thread.
       def start
@@ -171,6 +183,7 @@ module Pcrd
 
           begin
             @queue.push(txn, true) # non-blocking; raises ThreadError when full
+            @mutex.synchronize { @last_received_lsn = txn.commit_lsn }
             return
           rescue ThreadError
             send_status

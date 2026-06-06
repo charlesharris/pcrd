@@ -280,6 +280,11 @@ RSpec.describe "streaming pipeline (integration)", :integration do
       expect(acked.size).to be >= 2
       rows = target_pool.exec("SELECT id, label, score FROM pcrd_stream_test ORDER BY id").to_a
       expect(rows.map { |r| r["label"] }).to eq(%w[hello world])
+
+      # Observability metrics (P1.5): streaming read position and drained queue.
+      expect(consumer.last_received_lsn).to match(%r{\A[0-9A-F]+/[0-9A-F]+\z})
+      expect(consumer.queue_depth).to eq(0)
+      expect(worker.last_applied_lsn).to eq(consumer.last_received_lsn)
     ensure
       worker_pool&.close
     end

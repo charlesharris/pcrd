@@ -266,11 +266,9 @@ module Pcrd
         if now - last_lag_check >= lag_check_interval
           lag = lag_monitor.lag_bytes
           threshold = config.migrate.lag_threshold_bytes
-          if lag && lag <= threshold
-            $stdout.print "\r  Lag: #{lag_monitor.summary}  #{PASTEL.green("✓ Ready for cutover")}   "
-          else
-            $stdout.print "\r  Lag: #{lag_monitor.summary}   "
-          end
+          metrics = "queue: #{consumer.queue_depth}  applied: #{apply_worker.last_applied_lsn || '—'}"
+          ready   = (lag && lag <= threshold) ? "  #{PASTEL.green('✓ Ready for cutover')}" : ""
+          $stdout.print "\r  Lag: #{lag_monitor.summary}  |  #{metrics}#{ready}   "
           $stdout.flush
           last_lag_check = now
         end
