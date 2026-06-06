@@ -105,6 +105,11 @@ module Pcrd
       checkpoint  = Checkpoint::Store.new(config.migrate.checkpoint_db)
       setup       = Schema::Setup.new(source_pool: source_pool, target_pool: target_pool, config: config)
 
+      s = source_pool.session_settings
+      say "Session: application_name=#{s['application_name']}, lock_timeout=#{s['lock_timeout']}, " \
+          "idle_in_transaction=#{s['idle_in_transaction_session_timeout']}, " \
+          "statement_timeout=#{s['statement_timeout']}"
+
       # ── Setup (skipped on --resume) ────────────────────────────────────
       if options[:resume]
         start_lsn = checkpoint.backfill_start_lsn || "0/0"

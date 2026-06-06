@@ -17,12 +17,13 @@ module Pcrd
 
       def open
         @conn = PG.connect(
-          host:        @config.host,
-          port:        @config.port,
-          dbname:      @config.database,
-          user:        @config.user,
-          password:    @config.password,
-          replication: "database"
+          host:             @config.host,
+          port:             @config.port,
+          dbname:           @config.database,
+          user:             @config.user,
+          password:         @config.password,
+          application_name: "pcrd-replication",
+          replication:      "database"
         )
         self
       rescue PG::ConnectionBad, PG::Error => e
