@@ -17,18 +17,40 @@ module Pcrd
       # Creates the publication and replication slot on the source.
       # Returns the slot's starting LSN as a "X/Y" string — pass this to the
       # consumer so streaming begins from a point that covers all of backfill.
+      # Idempotently ensures the publication and replication slot exist for a
+      # fresh migration, returning the slot's starting LSN ("X/Y").
+      #
+      # A leftover publication from a partial prior run is reused if it covers
+      # exactly the configured tables (it is just a definition). A leftover
+      # slot is NOT reused: its WAL position is unknown relative to backfill, so
+      # we refuse and point the operator at --resume or `pcrd cleanup`.
       def create_publication_and_slot(pub_name:, slot_name:)
-        table_list = @config.migrate.tables.map { |t| Sql.quote_table(t.name) }.join(", ")
+        ensure_publication(pub_name)
 
-        @source_pool.exec_sql(
-          "CREATE PUBLICATION #{@source_pool.quote_ident(pub_name)} FOR TABLE #{table_list}"
-        )
+        if slot_exists?(slot_name)
+          raise "Replication slot '#{slot_name}' already exists. Resume the existing " \
+                "migration with --resume, or remove it with `pcrd cleanup` to start over."
+        end
 
         result = @source_pool.exec(
           "SELECT lsn FROM pg_create_logical_replication_slot($1, 'pgoutput')",
           [slot_name]
         )
         result[0]["lsn"]
+      end
+
+      # Validates that a --resume run has the slot and publication it needs.
+      # Raises with a clear message if either is missing.
+      def validate_resumable!(pub_name:, slot_name:)
+        unless slot_exists?(slot_name)
+          raise "Cannot resume: replication slot '#{slot_name}' does not exist on the source. " \
+                "Start a fresh migration (without --resume)."
+        end
+
+        unless publication_exists?(pub_name)
+          raise "Cannot resume: publication '#{pub_name}' does not exist on the source. " \
+                "Start a fresh migration (without --resume)."
+        end
       end
 
       # Drops the publication and replication slot (cleanup phase).
@@ -75,6 +97,46 @@ module Pcrd
         end
 
         ddls
+      end
+
+      private
+
+      # Creates the publication if absent; reuses it if it already covers exactly
+      # the configured tables; raises if it exists but covers a different set.
+      def ensure_publication(pub_name)
+        configured = @config.migrate.tables.map(&:name).sort
+
+        if publication_exists?(pub_name)
+          existing = publication_tables(pub_name).sort
+          return if existing == configured
+
+          raise "Publication '#{pub_name}' already exists but covers #{existing.inspect}, " \
+                "not the configured tables #{configured.inspect}. " \
+                "Drop it with `pcrd cleanup` or reconcile the config."
+        end
+
+        table_list = @config.migrate.tables.map { |t| Sql.quote_table(t.name) }.join(", ")
+        @source_pool.exec_sql(
+          "CREATE PUBLICATION #{@source_pool.quote_ident(pub_name)} FOR TABLE #{table_list}"
+        )
+      end
+
+      def publication_exists?(pub_name)
+        @source_pool.exec(
+          "SELECT 1 FROM pg_publication WHERE pubname = $1", [pub_name]
+        ).ntuples.positive?
+      end
+
+      def publication_tables(pub_name)
+        @source_pool.exec(
+          "SELECT tablename FROM pg_publication_tables WHERE pubname = $1", [pub_name]
+        ).column_values(0)
+      end
+
+      def slot_exists?(slot_name)
+        @source_pool.exec(
+          "SELECT 1 FROM pg_replication_slots WHERE slot_name = $1", [slot_name]
+        ).ntuples.positive?
       end
     end
   end

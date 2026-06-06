@@ -89,6 +89,24 @@ module Pcrd
         set_meta("backfill_start_lsn", lsn)
       end
 
+      # Replication objects this migration created, recorded so a resume can be
+      # cross-checked against the config and cleanup knows what to remove.
+      def replication_slot
+        get_meta("replication_slot")
+      end
+
+      def set_replication_slot(name)
+        set_meta("replication_slot", name)
+      end
+
+      def publication
+        get_meta("publication")
+      end
+
+      def set_publication(name)
+        set_meta("publication", name)
+      end
+
       def started_at
         get_meta("started_at")
       end

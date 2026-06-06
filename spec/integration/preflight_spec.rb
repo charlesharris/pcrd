@@ -130,6 +130,43 @@ RSpec.describe Pcrd::Preflight, :integration do
       end
     end
 
+    context "replication object state" do
+      let(:tables) { [table_config(name: "pcrd_preflight_test", columns: { "id" => col_spec(type: "bigint") })] }
+      let(:slot)   { "pcrd_test_slot" }
+
+      def drop_slot
+        source_pool.exec(
+          "SELECT pg_drop_replication_slot($1) WHERE EXISTS " \
+          "(SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)", [slot]
+        )
+      end
+
+      after { drop_slot }
+
+      it "passes when no slot exists on a fresh run" do
+        result = described_class.new(make_config(tables: tables), {}).run
+        item = result.items.find { |i| i.label == "replication slot state" }
+        expect(item.status).to eq :pass
+        expect(item.detail).to include("will be created")
+      end
+
+      it "fails a fresh run when the slot already exists" do
+        source_pool.exec("SELECT pg_create_logical_replication_slot($1, 'pgoutput')", [slot])
+        result = described_class.new(make_config(tables: tables), {}).run
+        item = result.items.find { |i| i.label == "replication slot state" }
+        expect(item.status).to eq :fail
+        expect(item.detail).to include("already exists")
+        expect(result.passed).to be false
+      end
+
+      it "fails a --resume run when the slot is missing" do
+        result = described_class.new(make_config(tables: tables), { resume: true }).run
+        item = result.items.find { |i| i.label == "replication slot state" }
+        expect(item.status).to eq :fail
+        expect(item.detail).to include("does not exist")
+      end
+    end
+
     context "when the source table has REPLICA IDENTITY NOTHING" do
       let(:tables) { [table_config(name: "pcrd_preflight_test", columns: { "id" => col_spec(type: "bigint") })] }
 

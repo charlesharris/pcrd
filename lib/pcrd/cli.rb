@@ -121,6 +121,12 @@ module Pcrd
 
       # ── Setup (skipped on --resume) ────────────────────────────────────
       if options[:resume]
+        unless options[:"backfill-only"]
+          setup.validate_resumable!(
+            pub_name:  config.migrate.publication,
+            slot_name: config.migrate.replication_slot
+          )
+        end
         start_lsn = checkpoint.backfill_start_lsn || "0/0"
         say "\nResuming migration from LSN #{start_lsn}..."
       else
@@ -131,6 +137,8 @@ module Pcrd
             slot_name: config.migrate.replication_slot
           )
           checkpoint.set_backfill_start_lsn(start_lsn)
+          checkpoint.set_publication(config.migrate.publication)
+          checkpoint.set_replication_slot(config.migrate.replication_slot)
           say "  Slot created at LSN #{start_lsn}.", :green
         else
           start_lsn = "0/0"

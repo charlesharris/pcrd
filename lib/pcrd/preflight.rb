@@ -37,6 +37,7 @@ module Pcrd
       check_target_connection
       check_wal_level
       check_replication_slots
+      check_replication_objects
 
       (@config.migrate&.tables || []).each { |t| check_table(t) }
 
@@ -110,6 +111,34 @@ module Pcrd
         fail!("replication slots",
               "#{used} used / #{max_slots} max — need #{needed} free; " \
               "increase max_replication_slots in postgresql.conf")
+      end
+    end
+
+    # Checks whether the slot/publication already exist, interpreted against
+    # --resume: a fresh run must not collide with leftovers, and a resume must
+    # have something to resume. This catches the conflict before any work.
+    def check_replication_objects
+      return unless @source_ok
+      return unless @config.migrate
+
+      slot   = @config.migrate.replication_slot
+      resume = @options[:resume] || @options["resume"]
+      present = @source_pool.exec(
+        "SELECT 1 FROM pg_replication_slots WHERE slot_name = $1", [slot]
+      ).ntuples.positive?
+
+      if resume && !present
+        fail!("replication slot state",
+              "--resume given but slot '#{slot}' does not exist; " \
+              "run a fresh migration without --resume")
+      elsif resume
+        pass("replication slot state", "slot '#{slot}' present — will resume")
+      elsif present
+        fail!("replication slot state",
+              "slot '#{slot}' already exists from a previous run; resume it with --resume, " \
+              "or remove it with `pcrd cleanup` to start over")
+      else
+        pass("replication slot state", "no existing slot — will be created")
       end
     end
 
