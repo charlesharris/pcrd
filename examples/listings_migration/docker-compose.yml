@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Full example environment for the pcrd listings migration demo.
 #
 # Services:

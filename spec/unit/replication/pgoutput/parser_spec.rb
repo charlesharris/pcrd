@@ -15,8 +15,6 @@ require "pcrd"
 RSpec.describe Pcrd::Replication::Pgoutput::Parser do
   subject(:parser) { described_class.new }
 
-  M = Pcrd::Replication::Pgoutput::Messages
-
   # Null-terminated string helper
   def s(str) = str + "\x00"
 

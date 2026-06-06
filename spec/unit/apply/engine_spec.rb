@@ -3,9 +3,6 @@
 require "pcrd"
 
 RSpec.describe Pcrd::Apply::Engine do
-  M   = Pcrd::Replication::Pgoutput::Messages
-  Txn = Pcrd::Replication::Consumer::Transaction
-
   def col(name, type_name: "int4", formatted_type: "integer",
           alignment: 4, fixed_size: 4, nullable: true, default_expr: nil)
     Pcrd::Schema::Column.new(
@@ -100,13 +97,12 @@ RSpec.describe Pcrd::Apply::Engine do
   describe "INSERT event" do
     it "generates an INSERT ON CONFLICT upsert" do
       tc = table_config(name: "items")
-      engine, parser = make_engine(
+      engine, = make_engine(
         table_configs: [tc],
         source_cols:   source_columns,
         pk_cols:       { "items" => ["id"] }
       )
 
-      rel = parser.relation(1)
       txn = Txn.new(
         begin_msg: nil,
         events: [M::Insert.new(relation_id: 1, new_tuple: { "id" => "7", "score" => "42", "label" => "hi" })],

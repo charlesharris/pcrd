@@ -5,6 +5,15 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only token; this job only needs to check out and run tests.
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest

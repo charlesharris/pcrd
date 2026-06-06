@@ -111,7 +111,6 @@ RSpec.describe "cutover pipeline (integration)", :integration do
   describe "Cutover::Sequences#advance" do
     it "advances the target sequence to source max + buffer" do
       inserted_count = seed_and_copy(5)
-      config = make_config
 
       seqs = Pcrd::Cutover::Sequences.new(
         source_pool:   source_pool,

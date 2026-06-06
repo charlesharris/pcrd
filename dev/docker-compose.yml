@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Development environment: source and target PostgreSQL clusters.
 # source_db has wal_level=logical enabled for pcrd replication.
 #

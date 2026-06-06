@@ -44,10 +44,9 @@ module Pcrd
       private
 
       def print_status(store)
-        phase     = store.phase
-        started   = store.started_at
-        lsn       = store.lsn
-        start_lsn = store.backfill_start_lsn
+        phase   = store.phase
+        started = store.started_at
+        lsn     = store.lsn
 
         puts
         puts PASTEL.bold("Migration status")

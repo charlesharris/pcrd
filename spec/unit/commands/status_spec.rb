@@ -56,8 +56,6 @@ RSpec.describe Pcrd::Commands::Status do
 
       it "displays the phase" do
         config = minimal_config(checkpoint_db: db_path)
-        output = StringIO.new
-        # Capture puts calls
         expect_any_instance_of(Pcrd::Commands::Status).to receive(:print_status) do |cmd, _store|
           # Just verify it runs without error
         end
