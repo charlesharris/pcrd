@@ -62,6 +62,10 @@ RSpec.describe Pcrd::Readiness::Manifest, :integration do
     source_pool.exec_sql("CREATE INDEX idx_readiness_email ON pcrd_readiness_test (email)")
     source_pool.exec_sql("CREATE INDEX idx_readiness_status ON pcrd_readiness_test (status)")
     source_pool.exec_sql("ALTER TABLE pcrd_readiness_test ADD CONSTRAINT chk_readiness_status CHECK (status IS NOT NULL)")
+    source_pool.exec_sql("GRANT SELECT ON pcrd_readiness_test TO PUBLIC")
+    source_pool.exec_sql("COMMENT ON TABLE pcrd_readiness_test IS 'people'")
+    source_pool.exec_sql("COMMENT ON COLUMN pcrd_readiness_test.email IS 'contact email'")
+    source_pool.exec_sql("COMMENT ON COLUMN pcrd_readiness_test.status IS 'lifecycle'")
   end
 
   around do |example|
@@ -108,5 +112,39 @@ RSpec.describe Pcrd::Readiness::Manifest, :integration do
     expect(e.category).to eq("sequence")
     expect(e.status).to eq(:info)
     expect(e.detail).to include("cutover")
+  end
+
+  it "emits a GRANT for a privilege present only on the source" do
+    e = entry("PUBLIC")
+    expect(e.category).to eq("grant")
+    expect(e.status).to eq(:missing)
+    expect(e.ddl).to eq("GRANT SELECT ON public.pcrd_readiness_test TO PUBLIC;")
+  end
+
+  it "reports the owner (same on both clusters here)" do
+    e = manifest.tables.first.entries.find { |x| x.category == "owner" }
+    expect(e).not_to be_nil
+    expect(e.status).to eq(:present)
+  end
+
+  it "emits COMMENT ON TABLE for a missing table comment" do
+    e = entry("(table)")
+    expect(e.category).to eq("comment")
+    expect(e.status).to eq(:missing)
+    expect(e.ddl).to eq("COMMENT ON TABLE public.pcrd_readiness_test IS 'people';")
+  end
+
+  it "emits COMMENT ON COLUMN for an unchanged column" do
+    e = entry("email")
+    expect(e.category).to eq("comment")
+    expect(e.ddl).to eq("COMMENT ON COLUMN public.pcrd_readiness_test.email IS 'contact email';")
+  end
+
+  it "re-emits a renamed column's comment against the target column name" do
+    # status -> state; comments are rename-safe (only the identifier changes).
+    e = entry("state")
+    expect(e.category).to eq("comment")
+    expect(e.status).to eq(:missing)
+    expect(e.ddl).to eq("COMMENT ON COLUMN public.pcrd_readiness_test.state IS 'lifecycle';")
   end
 end

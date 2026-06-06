@@ -5,6 +5,13 @@ maintainability that lowers the cost of everything else. Within each tier,
 ordered by impact × severity and by dependency. None of these are "it's
 broken" — they are "make it safe to operate" and "make it easy to change."
 
+> **P1 status: complete** (branch `p1-production-readiness`).
+> P1.1 ✅ connection safety · P1.2 ✅ advisory lock · P1.3 ✅ idempotent
+> setup/resume · P1.4 ✅ throttling · P1.5 ✅ live metrics · P1.6 ✅ (scoped to
+> the routing fix; full multi-schema deferred) · P1.7 ✅ readiness manifest
+> (indexes/constraints/grants/owner/comments; sequences via cutover).
+> P2 not yet started.
+
 ---
 
 ## P1 — production readiness

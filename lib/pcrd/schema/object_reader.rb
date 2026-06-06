@@ -13,6 +13,7 @@ module Pcrd
       Index      = Data.define(:name, :definition, :unique, :columns)
       Constraint = Data.define(:name, :kind, :definition, :columns) # kind: f|u|c
       IdentityColumn = Data.define(:column, :kind) # kind: "identity" | "serial"
+      Grant      = Data.define(:grantee, :privileges)
 
       def initialize(pool)
         @pool = pool
@@ -53,11 +54,79 @@ module Pcrd
         end
       end
 
+      # The table's owner role name.
+      def owner(table_name, schema_name: "public")
+        row = @pool.exec(OWNER_SQL, [table_name, schema_name])
+        row.ntuples.zero? ? nil : row[0]["owner"]
+      end
+
+      # Explicit table privileges (the owner's implicit grant is excluded), one
+      # Grant per grantee with its sorted privilege list.
+      def grants(table_name, schema_name: "public")
+        owner_name = owner(table_name, schema_name: schema_name)
+        by_grantee = Hash.new { |h, k| h[k] = [] }
+
+        @pool.exec(GRANTS_SQL, [table_name, schema_name]).each do |r|
+          next if r["grantee"] == owner_name # owner already has everything
+
+          by_grantee[r["grantee"]] << r["privilege_type"]
+        end
+
+        by_grantee.map { |grantee, privs| Grant.new(grantee: grantee, privileges: privs.sort) }
+      end
+
+      # The table's COMMENT, or nil.
+      def table_comment(table_name, schema_name: "public")
+        row = @pool.exec(TABLE_COMMENT_SQL, [table_name, schema_name])
+        row.ntuples.zero? ? nil : row[0]["comment"]
+      end
+
+      # Hash<column_name, comment> for columns that have a COMMENT.
+      def column_comments(table_name, schema_name: "public")
+        @pool.exec(COLUMN_COMMENTS_SQL, [table_name, schema_name])
+             .each_with_object({}) { |r, h| h[r["attname"]] = r["comment"] }
+      end
+
       private
 
       def split_list(str)
         str.to_s.empty? ? [] : str.split(",")
       end
+
+      OWNER_SQL = <<~SQL.freeze
+        SELECT pg_get_userbyid(c.relowner) AS owner
+        FROM   pg_class c
+        JOIN   pg_namespace n ON n.oid = c.relnamespace
+        WHERE  c.relname = $1 AND n.nspname = $2
+      SQL
+
+      GRANTS_SQL = <<~SQL.freeze
+        SELECT CASE WHEN g.grantee = 0 THEN 'PUBLIC'
+                    ELSE pg_get_userbyid(g.grantee) END AS grantee,
+               g.privilege_type
+        FROM   pg_class c
+        JOIN   pg_namespace n ON n.oid = c.relnamespace
+        CROSS  JOIN LATERAL aclexplode(c.relacl) AS g
+        WHERE  c.relname = $1 AND n.nspname = $2
+      SQL
+
+      TABLE_COMMENT_SQL = <<~SQL.freeze
+        SELECT obj_description(c.oid, 'pg_class') AS comment
+        FROM   pg_class c
+        JOIN   pg_namespace n ON n.oid = c.relnamespace
+        WHERE  c.relname = $1 AND n.nspname = $2
+      SQL
+
+      COLUMN_COMMENTS_SQL = <<~SQL.freeze
+        SELECT a.attname, col_description(a.attrelid, a.attnum) AS comment
+        FROM   pg_attribute a
+        JOIN   pg_class c     ON c.oid = a.attrelid
+        JOIN   pg_namespace n ON n.oid = c.relnamespace
+        WHERE  c.relname = $1 AND n.nspname = $2
+          AND  a.attnum > 0 AND NOT a.attisdropped
+          AND  col_description(a.attrelid, a.attnum) IS NOT NULL
+        ORDER  BY a.attnum
+      SQL
 
       INDEXES_SQL = <<~SQL.freeze
         SELECT i.relname AS index_name,

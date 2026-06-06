@@ -55,7 +55,10 @@ module Pcrd
 
         index_entries(name, src.indexes(name), present_idx, drops, renames) +
           constraint_entries(name, src.constraints(name), present_con, drops, renames) +
-          sequence_entries(src.identity_columns(name))
+          sequence_entries(src.identity_columns(name)) +
+          owner_entries(name, src, tgt) +
+          grant_entries(name, src, tgt) +
+          comment_entries(name, src, tgt, drops, renames)
       end
 
       def index_entries(table, indexes, present, drops, renames)
@@ -96,6 +99,71 @@ module Pcrd
           entry("sequence", col.column, :info,
                 "#{col.kind} column — restored automatically by `pcrd cutover`", nil)
         end
+      end
+
+      def owner_entries(table, src, tgt)
+        source_owner = src.owner(table)
+        return [] unless source_owner
+
+        if source_owner == tgt.owner(table)
+          [entry("owner", source_owner, :present, "owner already #{source_owner}", nil)]
+        else
+          [entry("owner", source_owner, :missing, "set owner to #{source_owner}",
+                 "ALTER TABLE #{Sql.quote_table(table)} OWNER TO #{Sql.quote_ident(source_owner)};")]
+        end
+      end
+
+      def grant_entries(table, src, tgt)
+        target = tgt.grants(table).to_h { |g| [g.grantee, g.privileges] }
+
+        src.grants(table).map do |g|
+          have = target[g.grantee] || []
+          if (g.privileges - have).empty?
+            entry("grant", g.grantee, :present, g.privileges.join(", "), nil)
+          else
+            grantee_sql = g.grantee == "PUBLIC" ? "PUBLIC" : Sql.quote_ident(g.grantee)
+            entry("grant", g.grantee, :missing, g.privileges.join(", "),
+                  "GRANT #{g.privileges.join(', ')} ON #{Sql.quote_table(table)} TO #{grantee_sql};")
+          end
+        end
+      end
+
+      # Comments are rename-safe: only the column identifier changes, so a
+      # renamed column's comment is re-emitted against its target name; dropped
+      # columns are skipped.
+      def comment_entries(table, src, tgt, drops, renames)
+        entries = []
+
+        source_table_comment = src.table_comment(table)
+        if source_table_comment
+          status = source_table_comment == tgt.table_comment(table) ? :present : :missing
+          ddl    = status == :missing ? "COMMENT ON TABLE #{Sql.quote_table(table)} IS #{quote_literal(source_table_comment)};" : nil
+          entries << entry("comment", "(table)", status, truncate(source_table_comment), ddl)
+        end
+
+        target_comments = tgt.column_comments(table)
+        src.column_comments(table).each do |col, comment|
+          next if drops.include?(col)
+
+          target_col = renames[col] || col
+          if target_comments[target_col] == comment
+            entries << entry("comment", target_col, :present, truncate(comment), nil)
+          else
+            entries << entry("comment", target_col, :missing, truncate(comment),
+                             "COMMENT ON COLUMN #{Sql.quote_table(table)}.#{Sql.quote_ident(target_col)} " \
+                             "IS #{quote_literal(comment)};")
+          end
+        end
+
+        entries
+      end
+
+      def quote_literal(str)
+        "'#{str.gsub("'", "''")}'"
+      end
+
+      def truncate(str)
+        str.length > 40 ? "#{str[0, 37]}..." : str
       end
 
       # Injects CONCURRENTLY so the index build does not lock out writes.
