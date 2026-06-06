@@ -200,4 +200,33 @@ RSpec.describe "Backfill::Engine (integration)", :integration do
       expect(results.first.batch_count).to eq 0
     end
   end
+
+  describe "throttling" do
+    it "copies every row and paces to max_rows_per_second" do
+      seed_source(200)
+
+      throttled = Pcrd::Config::MigrateConfig.new(
+        replication_slot: "test", publication: "test",
+        checkpoint_db: checkpoint_path, batch_size: 100,
+        lag_threshold_bytes: 1_048_576, tables: [table_config],
+        max_rows_per_second: 500
+      )
+      cfg = Pcrd::Config::Root.new(
+        source: test_source_config, target: nil, migrate: throttled,
+        analyze: nil, verify: nil, cutover: nil, path: "test"
+      )
+      eng = Pcrd::Backfill::Engine.new(
+        source_pool: source_pool, target_pool: target_pool, config: cfg, checkpoint: checkpoint
+      )
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      eng.run
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      count = target_pool.exec("SELECT COUNT(*) FROM pcrd_backfill_test")[0]["count"].to_i
+      expect(count).to eq 200
+      # 200 rows at 500 rows/s ≈ 0.4s of enforced pacing; allow slack.
+      expect(elapsed).to be >= 0.25
+    end
+  end
 end

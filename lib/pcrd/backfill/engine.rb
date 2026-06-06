@@ -14,6 +14,16 @@ module Pcrd
     class Engine
       Result = Data.define(:table_name, :rows_copied, :batch_count, :duration_ms, :stopped_early)
 
+      # Seconds to pause after a batch to hold the average copy rate at or below
+      # `cap` rows/sec. Returns 0 when unthrottled or already slower than the cap.
+      def self.throttle_delay(row_count, duration_ms, cap)
+        return 0.0 unless cap && cap.positive?
+
+        needed  = row_count.to_f / cap
+        elapsed = duration_ms / 1000.0
+        [needed - elapsed, 0.0].max
+      end
+
       def initialize(source_pool:, target_pool:, config:, checkpoint:, source_schema: {})
         @source_pool   = source_pool
         @target_pool   = target_pool
@@ -99,6 +109,11 @@ module Pcrd
             duration_ms: result[:duration_ms],
             last_key:    last_key
           )
+
+          delay = self.class.throttle_delay(
+            result[:row_count], result[:duration_ms], @config.migrate.max_rows_per_second
+          )
+          interruptible_sleep(delay) if delay.positive?
         end
 
         Result.new(
@@ -120,6 +135,18 @@ module Pcrd
 
       def monotonic_ms
         Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond)
+      end
+
+      # Sleeps for `seconds`, in small slices, so a throttle pause still honors
+      # a stop request promptly instead of blocking until the full delay elapses.
+      def interruptible_sleep(seconds)
+        deadline = monotonic_ms + (seconds * 1000)
+        while monotonic_ms < deadline
+          break if stopped?
+
+          remaining = (deadline - monotonic_ms) / 1000.0
+          sleep [0.1, remaining].min
+        end
       end
     end
   end

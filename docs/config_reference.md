@@ -67,6 +67,11 @@ migrate:
   # Default: 1,048,576 (1 MB)
   lag_threshold_bytes: 1_048_576
 
+  # Optional cap on backfill copy rate (rows/second) to limit source load.
+  # Omit or leave unset for no throttling (full speed). Applies to backfill
+  # only; WAL apply is not throttled.
+  # max_rows_per_second: 50_000
+
   tables:
     - { ... }   # one entry per table to migrate
 ```

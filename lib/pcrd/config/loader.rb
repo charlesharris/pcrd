@@ -89,6 +89,7 @@ module Pcrd
           checkpoint_db:       raw.fetch(:checkpoint_db,      MIGRATE_DEFAULTS[:checkpoint_db]),
           batch_size:          raw.fetch(:batch_size,          MIGRATE_DEFAULTS[:batch_size]),
           lag_threshold_bytes: raw.fetch(:lag_threshold_bytes, MIGRATE_DEFAULTS[:lag_threshold_bytes]),
+          max_rows_per_second: raw[:max_rows_per_second],
           tables:              (raw[:tables] || []).map { build_table(_1) }
         )
       end

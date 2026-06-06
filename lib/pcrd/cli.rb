@@ -206,7 +206,11 @@ module Pcrd
       trap("INT")  { stop_requested = true; backfill_engine.stop!; say "\nStopping..." }
       trap("TERM") { stop_requested = true; backfill_engine.stop! }
 
-      say "\nStarting backfill..."
+      if (rps = config.migrate.max_rows_per_second)
+        say "\nStarting backfill (throttled to #{format_count(rps)} rows/s)..."
+      else
+        say "\nStarting backfill..."
+      end
       bf_results = backfill_engine.run(on_batch: method(:print_batch_progress))
       say ""
 
