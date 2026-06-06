@@ -164,9 +164,9 @@ module Pcrd
       end
 
       def validate_config!
-        raise "source connection required" if @config.source.nil?
-        raise "target connection required for verify" if @config.target.nil?
-        raise "no tables configured" if (@config.migrate&.tables || []).empty?
+        raise ConfigError, "source connection required" if @config.source.nil?
+        raise ConfigError, "target connection required for verify" if @config.target.nil?
+        raise ConfigError, "no tables configured" if (@config.migrate&.tables || []).empty?
       end
     end
   end

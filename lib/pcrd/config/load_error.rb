@@ -2,6 +2,6 @@
 
 module Pcrd
   module Config
-    class LoadError < StandardError; end
+    class LoadError < Pcrd::Error; end
   end
 end

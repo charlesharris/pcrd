@@ -2,6 +2,6 @@
 
 module Pcrd
   module Connection
-    class Error < StandardError; end
+    class Error < Pcrd::Error; end
   end
 end

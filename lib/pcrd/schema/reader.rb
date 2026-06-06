@@ -11,7 +11,7 @@ module Pcrd
 
       def read(table_name, schema_name: "public")
         rows = @pool.exec(COLUMNS_QUERY, [table_name, schema_name])
-        raise "Table #{schema_name}.#{table_name} not found" if rows.ntuples.zero?
+        raise TableNotFound, "Table #{schema_name}.#{table_name} not found" if rows.ntuples.zero?
 
         rows.map { build_column(_1) }
       end

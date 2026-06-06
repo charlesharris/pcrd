@@ -284,7 +284,7 @@ module Pcrd
       raise Thor::Error, "ERROR: #{e.message}\n\nReplication stopped. Resume with --resume once the cause is resolved."
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
-    rescue RuntimeError => e
+    rescue Pcrd::Error => e
       raise Thor::Error, "ERROR: #{e.message}"
     ensure
       # Stop the producer first so the queue is finite, then let the worker
@@ -332,7 +332,7 @@ module Pcrd
       Output::ReadinessPrinter.new.print(result)
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
-    rescue RuntimeError => e
+    rescue Pcrd::Error => e
       raise Thor::Error, "ERROR: #{e.message}"
     end
 
@@ -404,7 +404,7 @@ module Pcrd
       exit(result.passed ? 0 : 1)
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
-    rescue RuntimeError => e
+    rescue Pcrd::Error => e
       raise Thor::Error, "ERROR: #{e.message}"
     end
 
@@ -427,7 +427,7 @@ module Pcrd
       Commands::Cleanup.new(config, options).run
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
-    rescue RuntimeError => e
+    rescue Pcrd::Error => e
       raise Thor::Error, "ERROR: #{e.message}"
     end
 

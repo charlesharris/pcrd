@@ -76,7 +76,7 @@ RSpec.describe Pcrd::Schema::Reader, :integration do
     end
 
     it "raises an error for a non-existent table" do
-      expect { reader.read("no_such_table_xyz") }.to raise_error(RuntimeError, /not found/)
+      expect { reader.read("no_such_table_xyz") }.to raise_error(Pcrd::Schema::TableNotFound, /not found/)
     end
   end
 

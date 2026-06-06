@@ -5,6 +5,6 @@ module Pcrd
     # Raised when the WAL streaming consumer stops unexpectedly (e.g. the
     # replication connection drops or pgoutput parsing fails). Carries the
     # original error as #cause when available.
-    class Error < StandardError; end
+    class Error < Pcrd::Error; end
   end
 end

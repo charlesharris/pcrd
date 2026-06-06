@@ -28,8 +28,8 @@ module Pcrd
         ensure_publication(pub_name)
 
         if slot_exists?(slot_name)
-          raise "Replication slot '#{slot_name}' already exists. Resume the existing " \
-                "migration with --resume, or remove it with `pcrd cleanup` to start over."
+          raise SetupError, "Replication slot '#{slot_name}' already exists. Resume the existing " \
+                            "migration with --resume, or remove it with `pcrd cleanup` to start over."
         end
 
         result = @source_pool.exec(
@@ -43,13 +43,13 @@ module Pcrd
       # Raises with a clear message if either is missing.
       def validate_resumable!(pub_name:, slot_name:)
         unless slot_exists?(slot_name)
-          raise "Cannot resume: replication slot '#{slot_name}' does not exist on the source. " \
-                "Start a fresh migration (without --resume)."
+          raise SetupError, "Cannot resume: replication slot '#{slot_name}' does not exist on the source. " \
+                            "Start a fresh migration (without --resume)."
         end
 
         unless publication_exists?(pub_name)
-          raise "Cannot resume: publication '#{pub_name}' does not exist on the source. " \
-                "Start a fresh migration (without --resume)."
+          raise SetupError, "Cannot resume: publication '#{pub_name}' does not exist on the source. " \
+                            "Start a fresh migration (without --resume)."
         end
       end
 
@@ -87,8 +87,8 @@ module Pcrd
             if force_overwrite
               @target_pool.exec_sql("DROP TABLE IF EXISTS #{Sql.quote_table(name)} CASCADE")
             else
-              raise "Table '#{name}' already exists on target. " \
-                    "Pass --force-overwrite to drop and recreate."
+              raise SetupError, "Table '#{name}' already exists on target. " \
+                                "Pass --force-overwrite to drop and recreate."
             end
           end
 
@@ -110,9 +110,9 @@ module Pcrd
           existing = publication_tables(pub_name).sort
           return if existing == configured
 
-          raise "Publication '#{pub_name}' already exists but covers #{existing.inspect}, " \
-                "not the configured tables #{configured.inspect}. " \
-                "Drop it with `pcrd cleanup` or reconcile the config."
+          raise SetupError, "Publication '#{pub_name}' already exists but covers #{existing.inspect}, " \
+                            "not the configured tables #{configured.inspect}. " \
+                            "Drop it with `pcrd cleanup` or reconcile the config."
         end
 
         table_list = @config.migrate.tables.map { |t| Sql.quote_table(t.name) }.join(", ")

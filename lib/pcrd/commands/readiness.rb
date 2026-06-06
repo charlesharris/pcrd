@@ -11,8 +11,8 @@ module Pcrd
       end
 
       def run
-        raise "target connection required for readiness" if @config.target.nil?
-        raise "no tables configured" if (@config.migrate&.tables || []).empty?
+        raise ConfigError, "target connection required for readiness" if @config.target.nil?
+        raise ConfigError, "no tables configured" if (@config.migrate&.tables || []).empty?
 
         source = Connection::Pool.new(@config.source)
         target = Connection::Pool.new(@config.target)

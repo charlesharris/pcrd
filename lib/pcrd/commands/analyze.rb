@@ -3,7 +3,7 @@
 module Pcrd
   module Commands
     class Analyze
-      class Error < StandardError; end
+      class Error < Pcrd::Error; end
 
       def initialize(config, options = {})
         @config  = config
