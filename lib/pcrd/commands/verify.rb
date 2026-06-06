@@ -20,8 +20,8 @@ module Pcrd
       def run
         validate_config!
 
-        source_pool = Connection::Pool.new(@config.source)
-        target_pool = Connection::Pool.new(@config.target)
+        source_pool = Connection::Client.new(@config.source)
+        target_pool = Connection::Client.new(@config.target)
         sample_size = @options[:"sample-size"] || @config.verify&.sample_size || 1_000
 
         table_results = (@config.migrate&.tables || []).map do |table_config|

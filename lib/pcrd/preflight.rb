@@ -315,7 +315,7 @@ module Pcrd
     # ── helpers ─────────────────────────────────────────────────────────────
 
     def open_pool(conn_config)
-      Connection::Pool.new(conn_config)
+      Connection::Client.new(conn_config)
     end
 
     def pass(label, detail = nil)  @items << Item.new(status: :pass, label: label, detail: detail) end

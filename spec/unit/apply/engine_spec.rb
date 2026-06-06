@@ -77,7 +77,7 @@ RSpec.describe Pcrd::Apply::Engine do
 
   # Returns a double that records SQL calls
   def pool_double
-    pool = instance_double("Pcrd::Connection::Pool")
+    pool = instance_double("Pcrd::Connection::Client")
     @sql_calls = []
     allow(pool).to receive(:exec) do |sql, params|
       @sql_calls << { sql: sql, params: params }

@@ -33,8 +33,8 @@ module Pcrd
       end
 
       def run
-        @source_pool = Connection::Pool.new(@config.source)
-        @target_pool = Connection::Pool.new(@config.target)
+        @source_pool = Connection::Client.new(@config.source)
+        @target_pool = Connection::Client.new(@config.target)
         @checkpoint  = Checkpoint::Store.new(@config.migrate.checkpoint_db)
         setup        = Schema::Setup.new(source_pool: @source_pool, target_pool: @target_pool, config: @config)
 
@@ -117,7 +117,7 @@ module Pcrd
       end
 
       # Starts the WAL consumer and the apply worker on its own target
-      # connection (Connection::Pool is single-connection and unsafe to share
+      # connection (Connection::Client is single-connection and unsafe to share
       # with backfill's writes).
       def start_streaming(start_lsn)
         repl_conn = Connection::Replication.new(@config.source)
@@ -131,7 +131,7 @@ module Pcrd
         @consumer.start
         @reporter.success("  Streaming from #{start_lsn}.")
 
-        @apply_pool  = Connection::Pool.new(@config.target)
+        @apply_pool  = Connection::Client.new(@config.target)
         apply_engine = Apply::Engine.new(
           target_pool: @apply_pool, config: @config, parser: @parser,
           source_schema: read_source_schema

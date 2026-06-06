@@ -47,7 +47,7 @@ module Pcrd
         slot = @config.migrate.replication_slot
         pub  = @config.migrate.publication
 
-        pool = Connection::Pool.new(@config.source)
+        pool = Connection::Client.new(@config.source)
 
         # Drop replication slot
         result = pool.exec(
@@ -98,7 +98,7 @@ module Pcrd
           return
         end
 
-        pool = Connection::Pool.new(@config.source)
+        pool = Connection::Client.new(@config.source)
         table_names.each do |name|
           pool.exec_sql("DROP TABLE IF EXISTS public.#{pool.quote_ident(name)} CASCADE")
           output.puts "  #{PASTEL.green("✓")}  Dropped source table: #{name}"

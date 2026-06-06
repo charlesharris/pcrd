@@ -13,7 +13,7 @@ module Pcrd
       def run
         validate_config!
 
-        source_pool = Connection::Pool.new(@config.source)
+        source_pool = Connection::Client.new(@config.source)
         reader      = Schema::Reader.new(source_pool)
         packer      = Schema::Packer.new
         printer     = Output::AnalyzePrinter.new
@@ -50,7 +50,7 @@ module Pcrd
       def run_compare(reader, packer, printer)
         validate_compare_config!
 
-        target_pool   = Connection::Pool.new(@config.target)
+        target_pool   = Connection::Client.new(@config.target)
         target_reader = Schema::Reader.new(target_pool)
         differ        = Schema::Differ.new
 

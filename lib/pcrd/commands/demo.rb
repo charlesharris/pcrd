@@ -27,7 +27,7 @@ module Pcrd
       DESC
       def setup
         config = load_config!
-        pool   = Pcrd::Connection::Pool.new(config.source)
+        pool   = Pcrd::Connection::Client.new(config.source)
 
         say "Connecting to #{config.source.host}:#{config.source.port}/#{config.source.database}..."
 
@@ -74,7 +74,7 @@ module Pcrd
                     desc: "Random seed for reproducible data generation"
       def seed
         config    = load_config!
-        pool      = Pcrd::Connection::Pool.new(config.source)
+        pool      = Pcrd::Connection::Client.new(config.source)
         generator = Pcrd::Demo::Generator.new(pool, seed: options[:seed])
 
         say "Seeding demo database at #{config.source.host}/#{config.source.database}..."
@@ -100,7 +100,7 @@ module Pcrd
       desc "reset", "Drop all demo tables (non-destructive: data only, not config)"
       def reset
         config = load_config!
-        pool   = Pcrd::Connection::Pool.new(config.source)
+        pool   = Pcrd::Connection::Client.new(config.source)
 
         say "Dropping demo tables on #{config.source.host}/#{config.source.database}..."
         pool.exec_sql(Pcrd::Demo::Schema::DROP_SQL)

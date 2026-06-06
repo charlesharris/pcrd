@@ -4,7 +4,7 @@ require "pg"
 
 module PgHelpers
   def source_pool
-    @source_pool ||= Pcrd::Connection::Pool.new(test_source_config)
+    @source_pool ||= Pcrd::Connection::Client.new(test_source_config)
   end
 
   def test_source_config

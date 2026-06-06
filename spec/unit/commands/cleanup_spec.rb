@@ -37,11 +37,11 @@ RSpec.describe Pcrd::Commands::Cleanup do
       config = make_config(checkpoint_db: db_path)
 
       # Mock source connection to avoid real DB calls
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:exec)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:exec)
         .and_return(double("result", ntuples: 0))
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:exec_sql)
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:quote_ident) { |_, n| "\"#{n}\"" }
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:close)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:exec_sql)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:quote_ident) { |_, n| "\"#{n}\"" }
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:close)
 
       run_cleanup(config)
       expect(File.exist?(db_path)).to be false
@@ -50,11 +50,11 @@ RSpec.describe Pcrd::Commands::Cleanup do
     it "does not raise when the checkpoint does not exist" do
       config = make_config(checkpoint_db: File.join(tmpdir, "no_checkpoint.sqlite3"))
 
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:exec)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:exec)
         .and_return(double("result", ntuples: 0))
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:exec_sql)
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:quote_ident) { |_, n| "\"#{n}\"" }
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:close)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:exec_sql)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:quote_ident) { |_, n| "\"#{n}\"" }
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:close)
 
       expect { run_cleanup(config) }.not_to raise_error
     end
@@ -65,9 +65,9 @@ RSpec.describe Pcrd::Commands::Cleanup do
       File.write(db_path, "")
       config = make_config(checkpoint_db: db_path)
 
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:exec)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:exec)
         .and_raise(Pcrd::Connection::Error, "connection refused")
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:close)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:close)
 
       result = run_cleanup(config)
       expect(result).to include("Could not connect")
@@ -78,11 +78,11 @@ RSpec.describe Pcrd::Commands::Cleanup do
     it "prints a completion message" do
       config = make_config(checkpoint_db: db_path)
 
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:exec)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:exec)
         .and_return(double("result", ntuples: 0))
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:exec_sql)
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:quote_ident) { |_, n| "\"#{n}\"" }
-      allow_any_instance_of(Pcrd::Connection::Pool).to receive(:close)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:exec_sql)
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:quote_ident) { |_, n| "\"#{n}\"" }
+      allow_any_instance_of(Pcrd::Connection::Client).to receive(:close)
 
       result = run_cleanup(config)
       expect(result).to include("Cleanup complete")

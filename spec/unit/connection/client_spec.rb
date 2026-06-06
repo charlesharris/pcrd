@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-RSpec.describe Pcrd::Connection::Pool do
+RSpec.describe Pcrd::Connection::Client do
   let(:config) do
     Pcrd::Config::Connection.new(host: "h", port: 5432, database: "d", user: "u", password: nil)
   end

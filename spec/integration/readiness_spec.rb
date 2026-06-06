@@ -36,7 +36,7 @@ RSpec.describe Pcrd::Readiness::Manifest, :integration do
     )
   end
 
-  let(:target_pool) { Pcrd::Connection::Pool.new(target_config) }
+  let(:target_pool) { Pcrd::Connection::Client.new(target_config) }
 
   let(:config) do
     table = Pcrd::Config::Table.new(

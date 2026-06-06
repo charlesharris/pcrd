@@ -19,7 +19,7 @@ RSpec.describe Pcrd::Migration::Orchestrator, :integration do
     )
   end
 
-  let(:target_pool)     { Pcrd::Connection::Pool.new(target_conn) }
+  let(:target_pool)     { Pcrd::Connection::Client.new(target_conn) }
   let(:checkpoint_path) { File.join(Dir.mktmpdir, "orch.sqlite3") }
 
   let(:config) do

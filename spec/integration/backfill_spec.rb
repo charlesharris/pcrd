@@ -26,7 +26,7 @@ RSpec.describe "Backfill::Engine (integration)", :integration do
   SQL
 
   let(:target_pool) do
-    Pcrd::Connection::Pool.new(
+    Pcrd::Connection::Client.new(
       Pcrd::Config::Connection.new(
         host:     ENV.fetch("PCRD_TEST_TARGET_HOST",     "localhost"),
         port:     ENV.fetch("PCRD_TEST_TARGET_PORT",     "5434").to_i,

@@ -3,7 +3,7 @@
 require "pcrd"
 require_relative "../support/pg_helpers"
 
-RSpec.describe Pcrd::Connection::Pool, :integration do
+RSpec.describe Pcrd::Connection::Client, :integration do
   include PgHelpers
 
   def show(pool, name)

@@ -12,7 +12,7 @@ module Pcrd
     #
     # Threading contract:
     #   - The Apply::Engine here MUST use a target connection that is not shared
-    #     with backfill — a Connection::Pool wraps a single PG connection and is
+    #     with backfill — a Connection::Client wraps a single PG connection and is
     #     not safe to use from two threads at once.
     #   - on_committed is invoked (on this thread) after each transaction is
     #     durably applied, with the commit LSN. Wire it to checkpoint + the

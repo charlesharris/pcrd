@@ -91,7 +91,7 @@ module Pcrd
       def print_live_lag(store)
         return unless @config.source && @config.migrate&.replication_slot
 
-        source_pool = Connection::Pool.new(@config.source)
+        source_pool = Connection::Client.new(@config.source)
         lag_monitor = Monitor::Lag.new(
           source_pool: source_pool,
           slot_name:   @config.migrate.replication_slot

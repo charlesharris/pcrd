@@ -4,7 +4,7 @@ require "pg"
 
 module Pcrd
   module Connection
-    class Pool
+    class Client
       # Conservative per-session defaults applied to every connection.
       #
       #   application_name                     — identifies pcrd in pg_stat_activity

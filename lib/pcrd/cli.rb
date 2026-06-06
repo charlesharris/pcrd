@@ -177,8 +177,8 @@ module Pcrd
         return unless answer.strip.downcase == "y"
       end
 
-      source_pool = Connection::Pool.new(config.source)
-      target_pool = Connection::Pool.new(config.target)
+      source_pool = Connection::Client.new(config.source)
+      target_pool = Connection::Client.new(config.target)
       printer     = Output::CutoverPrinter.new
 
       say "\nRunning cutover sequence..."

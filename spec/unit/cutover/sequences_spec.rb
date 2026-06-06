@@ -4,7 +4,7 @@ require "pcrd"
 
 RSpec.describe Pcrd::Cutover::Sequences do
   def make_pool(exec_results: {}, quote_results: {})
-    pool = instance_double("Pcrd::Connection::Pool")
+    pool = instance_double("Pcrd::Connection::Client")
 
     allow(pool).to receive(:exec) do |sql, params = []|
       key = sql.strip.split.first(3).join(" ").downcase
