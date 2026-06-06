@@ -311,6 +311,31 @@ module Pcrd
       raise Thor::Error, "ERROR: #{e.message}"
     end
 
+    desc "readiness", "Report target objects (indexes, constraints) to add before cutover"
+    long_desc <<~DESC
+      The load schema created by `pcrd migrate` is intentionally minimal — just
+      the table and its primary key — so the bulk copy is fast. This command
+      compares the source and target and reports the secondary objects that must
+      be added to the target before cutover: non-PK indexes and foreign-key,
+      unique, and check constraints. It prints runnable DDL (CREATE INDEX
+      CONCURRENTLY / ALTER TABLE ADD CONSTRAINT) for the missing ones.
+
+      Objects that reference dropped or renamed columns are flagged for manual
+      review rather than auto-generated. Sequences and identity columns are
+      listed for reference but are restored automatically by `pcrd cutover`.
+
+      Read-only; safe to run any time after backfill.
+    DESC
+    def readiness
+      config = load_config!
+      result = Commands::Readiness.new(config, options).run
+      Output::ReadinessPrinter.new.print(result)
+    rescue Connection::Error => e
+      raise Thor::Error, "Connection failed: #{e.message}"
+    rescue RuntimeError => e
+      raise Thor::Error, "ERROR: #{e.message}"
+    end
+
     desc "cutover", "Trigger the cutover sequence"
     long_desc <<~DESC
       Drains remaining replication lag to zero, advances sequences on the target
