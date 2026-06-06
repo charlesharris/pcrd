@@ -7,7 +7,7 @@ module Pcrd
     class Readiness
       def initialize(config, options = {})
         @config  = config
-        @options = options
+        @options = Options.normalize(options)
       end
 
       def run

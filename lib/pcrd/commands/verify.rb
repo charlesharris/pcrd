@@ -14,7 +14,7 @@ module Pcrd
 
       def initialize(config, options = {})
         @config  = config
-        @options = options
+        @options = Options.normalize(options)
       end
 
       def run
@@ -22,8 +22,7 @@ module Pcrd
 
         source_pool = Connection::Pool.new(@config.source)
         target_pool = Connection::Pool.new(@config.target)
-        sample_size = @options["sample-size"] || @options[:"sample-size"] ||
-                      @config.verify&.sample_size || 1_000
+        sample_size = @options[:"sample-size"] || @config.verify&.sample_size || 1_000
 
         table_results = (@config.migrate&.tables || []).map do |table_config|
           verify_table(source_pool, target_pool, table_config, sample_size)

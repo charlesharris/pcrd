@@ -19,7 +19,7 @@ module Pcrd
 
       def initialize(config:, options: {}, reporter: Reporter::Console.new)
         @config   = config
-        @options  = options
+        @options  = Options.normalize(options)
         @reporter = reporter
         @mutex    = Mutex.new
         @stop     = false

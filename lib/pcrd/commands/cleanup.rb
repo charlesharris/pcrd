@@ -21,7 +21,7 @@ module Pcrd
 
       def initialize(config, options = {})
         @config  = config
-        @options = options
+        @options = Options.normalize(options)
       end
 
       def run(output: $stdout)

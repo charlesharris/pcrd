@@ -7,7 +7,7 @@ module Pcrd
 
       def initialize(config, options = {})
         @config  = config
-        @options = options
+        @options = Options.normalize(options)
       end
 
       def run
@@ -30,7 +30,7 @@ module Pcrd
       private
 
       def compare_target?
-        @options["compare-target"] || @options[:"compare-target"]
+        @options[:"compare-target"]
       end
 
       def run_source_only(reader, packer, printer)
@@ -96,8 +96,8 @@ module Pcrd
       end
 
       def tables_to_analyze
-        if @options["table"]
-          [@options["table"]]
+        if @options[:table]
+          [@options[:table]]
         elsif @config.analyze&.tables&.any?
           @config.analyze.tables
         elsif @config.migrate&.tables&.any?

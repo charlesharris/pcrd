@@ -23,7 +23,7 @@ module Pcrd
 
     def initialize(config, options = {})
       @config  = config
-      @options = options
+      @options = Options.normalize(options)
       @items   = []
       @ddl_map = {}
       @row_counts = {}
@@ -122,7 +122,7 @@ module Pcrd
       return unless @config.migrate
 
       slot   = @config.migrate.replication_slot
-      resume = @options[:resume] || @options["resume"]
+      resume = @options[:resume]
       present = @source_pool.exec(
         "SELECT 1 FROM pg_replication_slots WHERE slot_name = $1", [slot]
       ).ntuples.positive?
@@ -232,7 +232,7 @@ module Pcrd
 
       reader = Schema::Reader.new(@target_pool)
       if reader.table_exists?(name)
-        if @options["force-overwrite"] || @options[:"force-overwrite"]
+        if @options[:"force-overwrite"]
           warn("#{name}: target table", "already exists — will be dropped and recreated (--force-overwrite)")
         else
           fail!("#{name}: target table",
