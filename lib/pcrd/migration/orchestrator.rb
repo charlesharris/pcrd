@@ -172,9 +172,7 @@ module Pcrd
                             "in #{r.batch_count} batches#{status}")
         end
 
-        if @apply_worker&.failed?
-          raise Replication::Error, "Apply worker stopped: #{@apply_worker.error.message}"
-        end
+        raise_if_streaming_failed
 
         if results.any?(&:stopped_early) || stopped?
           @reporter.warn("\nInterrupted. Resume with --resume.")
@@ -183,6 +181,18 @@ module Pcrd
 
         @reporter.success("\nBackfill complete.")
         nil
+      end
+
+      # Surfaces a dead apply worker or WAL consumer as a Replication::Error so
+      # a failure during backfill (e.g. a TRUNCATE or a dropped connection)
+      # aborts promptly instead of being noticed only once streaming begins.
+      def raise_if_streaming_failed
+        if @apply_worker&.failed?
+          raise Replication::Error, "Apply worker stopped: #{@apply_worker.error.message}"
+        end
+        return unless @consumer&.failed?
+
+        raise Replication::Error, "WAL consumer stopped: #{@consumer.last_error.message}"
       end
 
       def stream_until_stopped

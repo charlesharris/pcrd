@@ -482,17 +482,17 @@ RSpec.describe Pcrd::Replication::Pgoutput::Parser do
     end
   end
 
-  # ── Column-name fallback when Relation not in cache ───────────────────────
+  # ── No cached Relation for a DML message ──────────────────────────────────
 
   describe "tuple with no cached Relation" do
-    it "falls back to positional column names (col_0, col_1)" do
+    it "raises ParseError rather than inventing column names" do
       # Insert without a preceding Relation message
       bytes = "I" + [999].pack("N") + "N" +
         [2].pack("n") +
         "t" + [1].pack("N") + "a" +
         "t" + [1].pack("N") + "b"
-      msg = parser.parse(bytes)
-      expect(msg.new_tuple.keys).to eq %w[col_0 col_1]
+      expect { parser.parse(bytes) }
+        .to raise_error(Pcrd::Replication::Pgoutput::ParseError, /No cached Relation for OID 999/)
     end
   end
 end

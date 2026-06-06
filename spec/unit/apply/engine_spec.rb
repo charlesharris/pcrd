@@ -138,6 +138,73 @@ RSpec.describe Pcrd::Apply::Engine do
     end
   end
 
+  describe "UPDATE event" do
+    it "uses the full-row upsert when no value is unchanged-TOAST" do
+      tc = table_config(name: "items")
+      engine, _ = make_engine(
+        table_configs: [tc],
+        source_cols:   source_columns,
+        pk_cols:       { "items" => ["id"] }
+      )
+
+      txn = Txn.new(
+        begin_msg: nil,
+        events: [M::Update.new(relation_id: 1, old_tuple: nil,
+                               new_tuple: { "id" => "7", "score" => "99", "label" => "hi" })],
+        commit_lsn: "0/100"
+      )
+      engine.apply(txn)
+
+      call = @sql_calls.first
+      expect(call[:sql]).to match(/INSERT INTO.*ON CONFLICT/m)
+      expect(call[:params]).to eq ["7", "99", "hi"]
+    end
+
+    it "emits a partial UPDATE that excludes unchanged-TOAST columns" do
+      tc = table_config(name: "items")
+      engine, _ = make_engine(
+        table_configs: [tc],
+        source_cols:   source_columns,
+        pk_cols:       { "items" => ["id"] }
+      )
+
+      # 'label' is a large TOASTed column whose value did not change.
+      txn = Txn.new(
+        begin_msg: nil,
+        events: [M::Update.new(relation_id: 1, old_tuple: nil,
+                               new_tuple: { "id" => "7", "score" => "99", "label" => :toast })],
+        commit_lsn: "0/110"
+      )
+      engine.apply(txn)
+
+      call = @sql_calls.first
+      expect(call[:sql]).to match(/\AUPDATE/)
+      expect(call[:sql]).to match(/SET\s+"?score"? = \$1/)
+      expect(call[:sql]).not_to match(/\blabel\b/)        # toast column preserved
+      expect(call[:sql]).to match(/WHERE\s+"?id"? = \$2/)
+      expect(call[:params]).to eq ["99", "7"]             # set values, then pk
+    end
+
+    it "skips the write when only the PK and unchanged-TOAST columns are present" do
+      tc = table_config(name: "items")
+      engine, _ = make_engine(
+        table_configs: [tc],
+        source_cols:   source_columns,
+        pk_cols:       { "items" => ["id"] }
+      )
+
+      txn = Txn.new(
+        begin_msg: nil,
+        events: [M::Update.new(relation_id: 1, old_tuple: nil,
+                               new_tuple: { "id" => "7", "score" => :toast, "label" => :toast })],
+        commit_lsn: "0/120"
+      )
+      engine.apply(txn)
+
+      expect(@sql_calls).to be_empty
+    end
+  end
+
   describe "with column rename in spec" do
     it "uses the renamed column name in the INSERT" do
       tc = table_config(

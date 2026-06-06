@@ -169,8 +169,25 @@ module Pcrd
           @current_begin  = nil
           @current_events = []
 
+        when Pgoutput::Messages::Truncate
+          reject_truncate(msg)
+
         # Relation and Type are cached by the parser; no action needed here.
         end
+      end
+
+      # pcrd does not replicate TRUNCATE: silently ignoring it would leave the
+      # target diverged from the source with no signal. Halt loudly so the
+      # operator can truncate the target deliberately and resume. The
+      # publication only covers migrated tables, so any TRUNCATE is relevant.
+      def reject_truncate(msg)
+        names = msg.relation_ids.map do |id|
+          (r = @parser.relation(id)) ? "#{r.namespace}.#{r.name}" : "oid:#{id}"
+        end
+        raise Error,
+              "TRUNCATE received for #{names.join(", ")}. pcrd does not replicate " \
+              "TRUNCATE; the target would silently diverge. Migration halted — " \
+              "truncate the target manually if intended, then resume."
       end
 
       # Pushes a transaction onto the bounded queue. If the queue is full the

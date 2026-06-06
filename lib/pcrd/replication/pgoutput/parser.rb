@@ -179,9 +179,19 @@ module Pcrd
           col_count = cur.read_uint16
           relation  = @relations[relation_id]
 
+          # A DML message must be preceded by its Relation message in the stream.
+          # If it is not, inventing positional names ("col_0", ...) would route
+          # and apply garbage silently. Fail loudly instead so the consumer
+          # surfaces a replication error rather than corrupting the target.
+          unless relation
+            raise ParseError,
+                  "No cached Relation for OID #{relation_id}; cannot decode tuple. " \
+                  "The Relation message was missed or the stream is out of order."
+          end
+
           col_count.times.each_with_object({}) do |i, hash|
             col_kind = cur.read_char
-            col_name = relation&.columns&.dig(i)&.name || "col_#{i}"
+            col_name = relation.columns[i]&.name || "col_#{i}"
 
             value = case col_kind
                     when "n" then nil        # SQL NULL

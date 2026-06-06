@@ -58,9 +58,11 @@ module Pcrd
 
         case event
         when Replication::Pgoutput::Messages::Insert
+          # INSERT always carries every column ('t'/'n', never 'u'), so the
+          # full-row upsert is always safe here.
           apply_upsert(plan, event.new_tuple)
         when Replication::Pgoutput::Messages::Update
-          apply_upsert(plan, event.new_tuple)
+          apply_update(plan, event.new_tuple)
         when Replication::Pgoutput::Messages::Delete
           apply_delete(plan, event.old_tuple)
         end
@@ -69,6 +71,43 @@ module Pcrd
       def apply_upsert(plan, tuple)
         transformed = plan.transformer.transform(tuple)
         @target_pool.exec(plan.upsert_sql, transformed.values)
+      end
+
+      # An UPDATE's new tuple may contain :toast sentinels for TOASTed columns
+      # whose value did not change — PostgreSQL does not re-send those values.
+      # Writing the sentinel through the upsert would corrupt the column with a
+      # literal "toast". When no column is unchanged-TOAST, the full-row upsert
+      # is correct and idempotent; otherwise we emit a partial UPDATE that sets
+      # only the changed columns, leaving the existing target value in place.
+      def apply_update(plan, tuple)
+        transformed = plan.transformer.transform(tuple)
+        if transformed.value?(:toast)
+          apply_partial_update(plan, transformed)
+        else
+          @target_pool.exec(plan.upsert_sql, transformed.values)
+        end
+      end
+
+      # Builds an UPDATE that excludes unchanged-TOAST columns (and the PK) from
+      # the SET list, keyed by primary key. If the row has not been backfilled
+      # yet this updates zero rows, which is fine: backfill reads live rows and
+      # will copy the current value later, and replayed upserts are idempotent,
+      # so the target still converges.
+      def apply_partial_update(plan, transformed)
+        set_cols = transformed.reject do |col, val|
+          val == :toast || plan.pk_target_cols.include?(col)
+        end
+        return if set_cols.empty? # only PK and unchanged-TOAST columns present
+
+        assignments = set_cols.keys.each_with_index
+                              .map { |c, i| "#{Sql.quote_ident(c)} = $#{i + 1}" }
+                              .join(", ")
+        where = plan.pk_target_cols.each_with_index
+                    .map { |c, i| "#{Sql.quote_ident(c)} = $#{set_cols.size + i + 1}" }
+                    .join(" AND ")
+        sql      = "UPDATE #{Sql.quote_table(plan.table_name)} SET #{assignments} WHERE #{where}"
+        pk_vals  = plan.pk_target_cols.map { |c| transformed[c] }
+        @target_pool.exec(sql, set_cols.values + pk_vals)
       end
 
       def apply_delete(plan, tuple)

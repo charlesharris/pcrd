@@ -201,6 +201,49 @@ RSpec.describe "streaming pipeline (integration)", :integration do
     end
   end
 
+  describe "UPDATE with an unchanged TOAST value" do
+    it "preserves the existing target value instead of writing the :toast sentinel" do
+      consumer     = create_slot_and_consumer
+      apply_engine = make_apply_engine(consumer)
+
+      big = "x" * 4000 # large enough to be stored out-of-line (TOASTed)
+      # EXTERNAL storage keeps the value out-of-line and uncompressed, so an
+      # UPDATE that does not touch `label` re-sends it as the 'u' sentinel
+      # rather than the full value — the exact case the apply engine must
+      # handle without corrupting the column.
+      source_pool.exec_sql("ALTER TABLE pcrd_stream_test ALTER COLUMN label SET STORAGE EXTERNAL")
+
+      source_pool.exec("INSERT INTO pcrd_stream_test VALUES ($1, $2, $3)", [1, big, 10])
+      source_pool.exec("UPDATE pcrd_stream_test SET score = $1 WHERE id = $2", [20, 1])
+
+      drain_queue(consumer, apply_engine)
+      consumer.stop
+
+      row = target_pool.exec("SELECT label, score FROM pcrd_stream_test WHERE id = 1").first
+      expect(row["score"]).to eq "20"
+      expect(row["label"]).to eq big        # not clobbered to a literal "toast"
+      expect(row["label"].length).to eq 4000
+    end
+  end
+
+  describe "TRUNCATE on a published table" do
+    it "halts the consumer loudly instead of silently diverging" do
+      consumer = create_slot_and_consumer
+
+      source_pool.exec("INSERT INTO pcrd_stream_test VALUES ($1, $2, $3)", [1, "a", 1])
+      source_pool.exec_sql("TRUNCATE pcrd_stream_test")
+
+      deadline = Time.now + 5
+      sleep 0.05 until consumer.failed? || Time.now > deadline
+
+      expect(consumer.failed?).to be(true)
+      expect(consumer.last_error).to be_a(Pcrd::Replication::Error)
+      expect(consumer.last_error.message).to match(/TRUNCATE received/)
+    ensure
+      consumer&.stop
+    end
+  end
+
   describe "DELETE" do
     it "applies delete events to the target" do
       consumer     = create_slot_and_consumer
