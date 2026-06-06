@@ -110,6 +110,15 @@ module Pcrd
           "idle_in_transaction=#{s['idle_in_transaction_session_timeout']}, " \
           "statement_timeout=#{s['statement_timeout']}"
 
+      # Prevent two concurrent migrations against the same slot from corrupting
+      # checkpoint/LSN progress and fighting over the replication slot.
+      migration_lock = AdvisoryLock.new(pool: source_pool, name: config.migrate.replication_slot)
+      unless migration_lock.try_acquire
+        raise Thor::Error,
+              "Another pcrd migration is already running against slot " \
+              "'#{config.migrate.replication_slot}'. Wait for it to finish, or stop it before retrying."
+      end
+
       # ── Setup (skipped on --resume) ────────────────────────────────────
       if options[:resume]
         start_lsn = checkpoint.backfill_start_lsn || "0/0"
@@ -274,6 +283,7 @@ module Pcrd
       apply_worker&.stop rescue nil
       apply_pool&.close rescue nil
       checkpoint&.close rescue nil
+      migration_lock&.release rescue nil
       source_pool&.close rescue nil
       target_pool&.close rescue nil
     end
