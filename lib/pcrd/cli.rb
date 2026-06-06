@@ -100,202 +100,16 @@ module Pcrd
         return unless answer.strip.downcase == "y"
       end
 
-      source_pool = Connection::Pool.new(config.source)
-      target_pool = Connection::Pool.new(config.target)
-      checkpoint  = Checkpoint::Store.new(config.migrate.checkpoint_db)
-      setup       = Schema::Setup.new(source_pool: source_pool, target_pool: target_pool, config: config)
-
-      s = source_pool.session_settings
-      say "Session: application_name=#{s['application_name']}, lock_timeout=#{s['lock_timeout']}, " \
-          "idle_in_transaction=#{s['idle_in_transaction_session_timeout']}, " \
-          "statement_timeout=#{s['statement_timeout']}"
-
-      # Prevent two concurrent migrations against the same slot from corrupting
-      # checkpoint/LSN progress and fighting over the replication slot.
-      migration_lock = AdvisoryLock.new(pool: source_pool, name: config.migrate.replication_slot)
-      unless migration_lock.try_acquire
-        raise Thor::Error,
-              "Another pcrd migration is already running against slot " \
-              "'#{config.migrate.replication_slot}'. Wait for it to finish, or stop it before retrying."
-      end
-
-      # ── Setup (skipped on --resume) ────────────────────────────────────
-      if options[:resume]
-        unless options[:"backfill-only"]
-          setup.validate_resumable!(
-            pub_name:  config.migrate.publication,
-            slot_name: config.migrate.replication_slot
-          )
-        end
-        start_lsn = checkpoint.backfill_start_lsn || "0/0"
-        say "\nResuming migration from LSN #{start_lsn}..."
-      else
-        unless options[:"backfill-only"]
-          say "\nCreating publication and replication slot..."
-          start_lsn = setup.create_publication_and_slot(
-            pub_name:  config.migrate.publication,
-            slot_name: config.migrate.replication_slot
-          )
-          checkpoint.set_backfill_start_lsn(start_lsn)
-          checkpoint.set_publication(config.migrate.publication)
-          checkpoint.set_replication_slot(config.migrate.replication_slot)
-          say "  Slot created at LSN #{start_lsn}.", :green
-        else
-          start_lsn = "0/0"
-        end
-
-        say "\nCreating target tables..."
-        setup.create_target_tables(force_overwrite: options[:"force-overwrite"])
-        say "  Target tables created.", :green
-      end
-
-      # ── WAL consumer + concurrent apply (streaming mode only) ──────────
-      # The consumer streams WAL into a bounded queue; the apply worker drains
-      # it on its own connection, concurrently with backfill, so the source
-      # slot keeps advancing instead of retaining WAL for the whole backfill.
-      consumer     = nil
-      apply_worker = nil
-      apply_pool   = nil
-
-      unless options[:"backfill-only"]
-        repl_conn = Connection::Replication.new(config.source)
-        parser    = Replication::Pgoutput::Parser.new
-        consumer  = Replication::Consumer.new(
-          repl_conn:  repl_conn,
-          parser:     parser,
-          slot_name:  config.migrate.replication_slot,
-          pub_name:   config.migrate.publication,
-          start_lsn:  start_lsn
-        )
-        say "\nStarting WAL consumer..."
-        consumer.start
-        say "  Streaming from #{start_lsn}.", :green
-
-        # Apply runs on its own target connection — Connection::Pool wraps a
-        # single PG connection and must not be shared with backfill's writes.
-        apply_pool   = Connection::Pool.new(config.target)
-        apply_engine = Apply::Engine.new(
-          target_pool:   apply_pool,
-          config:        config,
-          parser:        parser,
-          source_schema: read_source_schema(source_pool, config)
-        )
-        apply_worker = Apply::Worker.new(
-          engine: apply_engine,
-          queue:  consumer.queue,
-          # Acknowledge to the source only after the transaction is durably
-          # applied and checkpointed, so WAL is not released prematurely.
-          on_committed: lambda { |lsn|
-            checkpoint.set_lsn(lsn)
-            consumer.advance_lsn(lsn)
-          }
-        )
-        apply_worker.start
-        say "  Applying WAL concurrently with backfill.", :green
-      end
-
-      # ── Backfill (runs concurrently with the apply worker) ─────────────
-      backfill_engine = Backfill::Engine.new(
-        source_pool: source_pool,
-        target_pool: target_pool,
-        config:      config,
-        checkpoint:  checkpoint
-      )
-
-      stop_requested = false
-      trap("INT")  { stop_requested = true; backfill_engine.stop!; say "\nStopping..." }
-      trap("TERM") { stop_requested = true; backfill_engine.stop! }
-
-      if (rps = config.migrate.max_rows_per_second)
-        say "\nStarting backfill (throttled to #{format_count(rps)} rows/s)..."
-      else
-        say "\nStarting backfill..."
-      end
-      bf_results = backfill_engine.run(on_batch: method(:print_batch_progress))
-      say ""
-
-      bf_results.each do |r|
-        status = r.stopped_early ? " (interrupted)" : ""
-        say "  #{r.table_name}: #{format_count(r.rows_copied)} rows in #{r.batch_count} batches#{status}", :green
-      end
-
-      # An apply failure during backfill must abort, not be silently ignored.
-      if apply_worker&.failed?
-        raise Replication::Error, "Apply worker stopped: #{apply_worker.error.message}"
-      end
-
-      if bf_results.any?(&:stopped_early) || stop_requested
-        say "\nInterrupted. Resume with --resume.", :yellow
-        return
-      end
-
-      say "\nBackfill complete.", :green
-
-      if options[:"backfill-only"]
-        say "Run `pcrd verify` to check row counts, then `pcrd cutover` when ready."
-        return
-      end
-
-      # ── Streaming mode: the worker keeps applying; we monitor lag ──────
-      say "Entering streaming mode. Press Ctrl-C to stop.\n"
-
-      lag_monitor = Monitor::Lag.new(
-        source_pool: source_pool,
-        slot_name:   config.migrate.replication_slot
-      )
-
-      lag_check_interval = 2
-      last_lag_check     = 0
-
-      # Re-register SIGINT for the streaming phase so Ctrl-C breaks the loop cleanly.
-      trap("INT")  { stop_requested = true; say "\n\nStopping after current event..." }
-      trap("TERM") { stop_requested = true }
-
-      loop do
-        break if stop_requested
-
-        # Surface a dead worker or consumer instead of spinning forever.
-        if apply_worker.failed?
-          raise Replication::Error, "Apply worker stopped: #{apply_worker.error.message}"
-        end
-        if consumer.failed? && consumer.queue.empty?
-          raise Replication::Error, "WAL consumer stopped: #{consumer.last_error.message}"
-        end
-
-        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        if now - last_lag_check >= lag_check_interval
-          lag = lag_monitor.lag_bytes
-          threshold = config.migrate.lag_threshold_bytes
-          metrics = "queue: #{consumer.queue_depth}  applied: #{apply_worker.last_applied_lsn || '—'}"
-          ready   = (lag && lag <= threshold) ? "  #{PASTEL.green('✓ Ready for cutover')}" : ""
-          $stdout.print "\r  Lag: #{lag_monitor.summary}  |  #{metrics}#{ready}   "
-          $stdout.flush
-          last_lag_check = now
-        end
-        sleep 0.1
-      end
-
-      say ""
-      if stop_requested
-        say "Migration interrupted. Resume with:", :yellow
-        say "  pcrd migrate --config #{options[:config] || Config::DEFAULT_CONFIG_FILE} --resume", :yellow
-      end
+      orchestrator = Migration::Orchestrator.new(config: config, options: options)
+      trap("INT")  { orchestrator.request_stop }
+      trap("TERM") { orchestrator.request_stop }
+      orchestrator.run
     rescue Replication::Error => e
       raise Thor::Error, "ERROR: #{e.message}\n\nReplication stopped. Resume with --resume once the cause is resolved."
     rescue Connection::Error => e
       raise Thor::Error, "Connection failed: #{e.message}"
     rescue Pcrd::Error => e
       raise Thor::Error, "ERROR: #{e.message}"
-    ensure
-      # Stop the producer first so the queue is finite, then let the worker
-      # drain what's left before closing its connection.
-      consumer&.stop rescue nil
-      apply_worker&.stop rescue nil
-      apply_pool&.close rescue nil
-      checkpoint&.close rescue nil
-      migration_lock&.release rescue nil
-      source_pool&.close rescue nil
-      target_pool&.close rescue nil
     end
 
     desc "status", "Show current migration phase and replication lag"
@@ -455,29 +269,6 @@ module Pcrd
 
     def require_config!
       load_config!
-    end
-
-    # Reads source columns + PK for every migrated table, keyed by table name.
-    # Built once before the apply worker starts so it can run on its own thread.
-    def read_source_schema(source_pool, config)
-      reader = Schema::Reader.new(source_pool)
-      (config.migrate&.tables || []).each_with_object({}) do |table, h|
-        h[table.name] = {
-          columns:    reader.read(table.name),
-          pk_columns: reader.primary_key_columns(table.name)
-        }
-      end
-    end
-
-    def print_batch_progress(stats)
-      rps = stats[:duration_ms] > 0 ? (stats[:row_count] * 1000.0 / stats[:duration_ms]).round : 0
-      $stdout.print "\r  #{stats[:table]}  batch #{stats[:batch_num]}  " \
-                    "#{format_count(stats[:rows_so_far])} rows  #{format_count(rps)} rows/s    "
-      $stdout.flush
-    end
-
-    def format_count(n)
-      n.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
     end
   end
 end
