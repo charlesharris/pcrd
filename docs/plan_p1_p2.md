@@ -48,11 +48,20 @@ large-table counts are not silently expensive.
 
 ### P1.6 Schema support beyond `public`
 **Unblocks real multi-schema databases.** Refs: review #11, #12, #35.
-Depends on P0.4 (centralized quoting/qualification). Treat relation identity as
-`{schema, table}` everywhere; key apply plans by schema-qualified name (today
-`Apply::Engine` keys by `rel.name` only, so same-named tables in two schemas
-collide). Include namespace from pgoutput relation messages. Report
-unsupported relation kinds (partitioned/foreign/matview) clearly in preflight.
+Depends on P0.4 (centralized quoting/qualification).
+
+**Scoped down (decision):** only the collision-safe apply routing (#12) was
+done — `Apply::Engine` now keys plans by schema-qualified `namespace.name`
+using the pgoutput relation namespace, so a same-named table in another schema
+can no longer mis-route. ✅
+
+The **full feature** (#11 — migrating non-`public` tables: a per-table
+`schema:` config field threaded through reader/DDL/setup/backfill/verify/
+validator/preflight, plus a schema-qualified publication) is **deferred** until
+a real non-public use case exists. Agreed config shape when it lands: a
+separate `schema:` field per table (default `public`), source and target
+sharing the schema. Report unsupported relation kinds (partitioned/foreign/
+matview, #35) in preflight at that time.
 
 ### P1.7 Final DDL / target-readiness manifest
 **Prevents an incomplete cutover.** Refs: review #7, #15, #16, #17.

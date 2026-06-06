@@ -50,7 +50,10 @@ module Pcrd
         rel  = @parser.relation(event.relation_id)
         return unless rel
 
-        plan = @plans[rel.name]
+        # Route by schema-qualified relation name. Keying on the bare table name
+        # would mis-route events when two schemas hold a same-named table that
+        # the publication happens to include.
+        plan = @plans[relation_key(rel.namespace, rel.name)]
         return unless plan
 
         case event
@@ -75,6 +78,14 @@ module Pcrd
 
       # ── plan building ────────────────────────────────────────────────────
 
+      # Tables configured today are all in the public schema (there is no
+      # per-table schema field yet). When that lands, key off table_config.schema.
+      DEFAULT_SCHEMA = "public"
+
+      def relation_key(namespace, name)
+        "#{namespace}.#{name}"
+      end
+
       def build_plans(config, source_schema)
         (config.migrate&.tables || []).each_with_object({}) do |table_config, plans|
           schema = source_schema[table_config.name]
@@ -86,7 +97,7 @@ module Pcrd
           pk_target   = map_pk_to_target(pk_source, table_config)
           target_cols = transformer.target_column_names
 
-          plans[table_config.name] = TablePlan.new(
+          plans[relation_key(DEFAULT_SCHEMA, table_config.name)] = TablePlan.new(
             table_name:     table_config.name,
             transformer:    transformer,
             pk_source_cols: pk_source,

@@ -209,6 +209,33 @@ RSpec.describe Pcrd::Apply::Engine do
     end
   end
 
+  describe "schema-qualified routing" do
+    it "skips events for a same-named table in a different schema" do
+      tc = table_config(name: "items")
+      engine, parser = make_engine(
+        table_configs: [tc],
+        source_cols:   source_columns,
+        pk_cols:       { "items" => ["id"] }
+      )
+
+      # A different schema happens to contain a table also called "items".
+      other = M::Relation.new(
+        id: 42, namespace: "reporting", name: "items", replica_identity: "d",
+        columns: [M::RelationColumn.new(flags: 1, name: "id", type_id: 23, type_modifier: -1)]
+      )
+      parser.instance_variable_get(:@relations)[42] = other
+
+      txn = Txn.new(
+        begin_msg: nil,
+        events: [M::Insert.new(relation_id: 42, new_tuple: { "id" => "1" })],
+        commit_lsn: "0/700"
+      )
+      engine.apply(txn)
+
+      expect(@sql_calls).to be_empty # not our public.items
+    end
+  end
+
   describe "mixed transaction" do
     it "applies multiple events in the same DB transaction" do
       tc = table_config(name: "items")
