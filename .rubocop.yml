@@ -1,0 +1,40 @@
+inherit_from: .rubocop_todo.yml
+
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'bin/**/*'
+    - 'vendor/**/*'
+    - 'tmp/**/*'
+    - '*.gemspec'
+
+# Project style choices (match the code's consistent existing style so the todo
+# stays focused on real issues, not quote-character preferences).
+Style/Documentation:
+  Enabled: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+Style/QuotedSymbols:
+  EnforcedStyle: double_quotes
+
+# The code aligns hash values and assignments for readability on purpose.
+Layout/HashAlignment:
+  Enabled: false
+
+Style/FrozenStringLiteralComment:
+  Enabled: true
+
+# Specs and the gemspec are naturally long; don't police their block/length.
+Metrics/BlockLength:
+  Exclude:
+    - 'spec/**/*'
+
+Metrics/MethodLength:
+  Max: 25

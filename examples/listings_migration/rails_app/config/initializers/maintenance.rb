@@ -11,7 +11,8 @@
 #   docker compose exec rails_app rm /app/tmp/maintenance.txt
 
 class MaintenanceModeMiddleware
-  BODY = [{ status: "maintenance", message: "Service temporarily unavailable for maintenance. Please try again shortly." }.to_json].freeze
+  BODY = [{ status: "maintenance", 
+message: "Service temporarily unavailable for maintenance. Please try again shortly." }.to_json].freeze
 
   def initialize(app)
     @app = app

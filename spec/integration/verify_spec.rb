@@ -8,7 +8,7 @@ require_relative "../support/pg_helpers"
 RSpec.describe Pcrd::Commands::Verify, :integration do
   include PgHelpers
 
-  SOURCE_DDL = <<~SQL.freeze
+  VERIFY_SOURCE_DDL = <<~SQL.freeze
     CREATE TABLE pcrd_verify_test (
       id    integer NOT NULL,
       label text,
@@ -18,7 +18,7 @@ RSpec.describe Pcrd::Commands::Verify, :integration do
   SQL
 
   # Target widens id/score to bigint and renames label -> name.
-  TARGET_DDL = <<~SQL.freeze
+  VERIFY_TARGET_DDL = <<~SQL.freeze
     CREATE TABLE pcrd_verify_test (
       id    bigint NOT NULL,
       name  text,
@@ -66,8 +66,8 @@ RSpec.describe Pcrd::Commands::Verify, :integration do
 
   around do |example|
     target_pool.exec_sql("DROP TABLE IF EXISTS pcrd_verify_test CASCADE")
-    target_pool.exec_sql(TARGET_DDL)
-    with_table(source_pool, SOURCE_DDL, table_name: "pcrd_verify_test") do
+    target_pool.exec_sql(VERIFY_TARGET_DDL)
+    with_table(source_pool, VERIFY_SOURCE_DDL, table_name: "pcrd_verify_test") do
       example.run
     end
     target_pool.exec_sql("DROP TABLE IF EXISTS pcrd_verify_test CASCADE")

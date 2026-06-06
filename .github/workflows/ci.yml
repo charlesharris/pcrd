@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+
+      # Brings up the source (5433, wal_level=logical) and target (5434)
+      # clusters the integration suite expects; --wait blocks on healthchecks.
+      - name: Start PostgreSQL (source + target)
+        run: docker compose -f dev/docker-compose.yml up -d --wait
+
+      - name: Lint
+        run: bundle exec rubocop
+
+      - name: Test
+        run: bundle exec rspec
