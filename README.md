@@ -143,7 +143,7 @@ pcrd cutover --maintenance-confirmed
 
 pcrd looks for `pcrd.config.yml` in the current directory by default. Pass `--config path/to/file.yml` to override. Run `pcrd demo setup` to generate a sample file automatically.
 
-**Full reference:** [docs/config_reference.md](docs/config_reference.md)
+**Full reference:** [docs/config_reference.md](https://github.com/charlesharris/pcrd/blob/main/docs/config_reference.md)
 
 ### The most important rule: only specify what changes
 
@@ -494,7 +494,7 @@ max_wal_senders      = <current + number of concurrent pcrd migrations>
 - **Annotated `migration.yml`** showing all supported change types
 - **Operator runbook** walking through every step from setup to cleanup
 
-See [`examples/listings_migration/runbook.md`](examples/listings_migration/runbook.md).
+See [`examples/listings_migration/runbook.md`](https://github.com/charlesharris/pcrd/blob/main/examples/listings_migration/runbook.md).
 
 ---
 

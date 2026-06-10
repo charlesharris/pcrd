@@ -15,10 +15,18 @@ Gem::Specification.new do |spec|
     reordering with padding optimization. Designed for large tables where
     ALTER TABLE would cause unacceptable downtime.
   DESC
-  spec.homepage = "https://github.com/charris/pcrd"
+  spec.homepage = "https://github.com/charlesharris/pcrd"
+  spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
 
-  spec.files = Dir["lib/**/*", "bin/*", "README.md"]
+  spec.metadata = {
+    "source_code_uri"       => spec.homepage,
+    "changelog_uri"         => "#{spec.homepage}/blob/main/CHANGELOG.md",
+    "bug_tracker_uri"       => "#{spec.homepage}/issues",
+    "rubygems_mfa_required" => "true",
+  }
+
+  spec.files = Dir["lib/**/*", "bin/*", "README.md", "CHANGELOG.md", "LICENSE"]
   spec.executables = ["pcrd"]
   spec.require_paths = ["lib"]
 
